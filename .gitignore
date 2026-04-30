@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv*/
+venv/
+env/
+
+# Local runtime outputs
+widowx_ai/recordings*/
+widowx_ai/models/
+widowx_ai/*.log
+
+# Local machine/state files
+.codex
+.codex/
+.DS_Store
+
+# Large/reference files kept outside Git by default
+*.pdf
