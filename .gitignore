@@ -14,12 +14,14 @@ env/
 # Local runtime outputs
 widowx_ai/recordings*/
 widowx_ai/models/
-widowx_ai/*.log
+*.log
 
 # Local machine/state files
 .codex
 .codex/
+.env
 .DS_Store
 
 # Large/reference files kept outside Git by default
 *.pdf
+!docs/research/papers/*.pdf
