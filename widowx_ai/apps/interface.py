@@ -131,6 +131,11 @@ INDEX_HTML = """<!doctype html>
       justify-content: space-between;
       font-size: 14px;
     }
+    .status-main {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
     .dot {
       width: 10px;
       height: 10px;
@@ -152,10 +157,36 @@ INDEX_HTML = """<!doctype html>
       padding: 18px;
     }
     .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .tool-group {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 18px;
+      gap: 8px;
+      align-items: flex-start;
+      align-content: flex-start;
+      min-height: 100%;
+      padding: 10px;
+      background: #151a1e;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .tool-meta {
+      width: 100%;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .tool-label {
+      min-width: 92px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
     button {
       height: 40px;
@@ -265,7 +296,7 @@ INDEX_HTML = """<!doctype html>
     }
     .camera-controls {
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
       gap: 10px;
       margin-bottom: 12px;
     }
@@ -315,6 +346,7 @@ INDEX_HTML = """<!doctype html>
     @media (max-width: 880px) {
       header { align-items: stretch; flex-direction: column; }
       .layout { grid-template-columns: 1fr; }
+      .toolbar { grid-template-columns: 1fr; }
       .joint { grid-template-columns: 56px 1fr 82px; gap: 8px; }
       .camera-controls { grid-template-columns: 1fr; }
     }
@@ -327,24 +359,39 @@ INDEX_HTML = """<!doctype html>
         <h1>WidowX AI Control</h1>
         <div class="sub" id="subtitle"></div>
       </div>
-      <div class="status"><span><span class="dot warn" id="dot"></span> <span id="state">Initializing</span></span><span id="mode"></span></div>
+      <div class="status"><span class="status-main"><span class="dot warn" id="dot"></span> <span id="state">Initializing</span></span><span id="mode"></span></div>
     </header>
     <div class="layout">
       <section>
         <button class="emergency" onclick="emergencyStop()">Emergency stop</button>
         <div class="toolbar">
-          <button class="primary" onclick="connectArm()">Connect</button>
-          <button class="danger" onclick="disconnectArm()">Disconnect</button>
-          <button onclick="refreshStatus()">Refresh</button>
-          <button onclick="home()">Home</button>
-          <button onclick="rest()">Rest</button>
-          <button onclick="gripper(10)">Open gripper</button>
-          <button onclick="gripper(-10)">Close gripper</button>
-          <button onclick="gravityCompensation()">Gravity comp</button>
-          <button id="holdButton" onclick="toggleHold()">Hold</button>
-          <button onclick="location.href='/teach'">Teaching</button>
-          <button onclick="location.href='/model-test'">Model test</button>
-          <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
+          <div class="tool-group">
+            <span class="tool-label">Session</span>
+            <button class="primary" onclick="connectArm()">Connect</button>
+            <button class="danger" onclick="disconnectArm()">Disconnect</button>
+            <button onclick="refreshStatus()">Refresh</button>
+            <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Positions</span>
+            <button onclick="home()">Home</button>
+            <button onclick="goToStartPosition()">Start position</button>
+            <button onclick="saveStartPosition()">Save start</button>
+            <button onclick="rest()">Rest</button>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Gripper</span>
+            <button onclick="gripper(10)">Open gripper</button>
+            <button onclick="gripper(-10)">Close gripper</button>
+            <div class="tool-meta">Opening: <span id="gripperStatus">n/a</span></div>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Tools</span>
+            <button onclick="gravityCompensation()">Gravity comp</button>
+            <button id="holdButton" onclick="toggleHold()">Hold</button>
+            <button onclick="location.href='/teach'">Teaching</button>
+            <button onclick="location.href='/model-test'">Model test</button>
+          </div>
         </div>
         <div id="joints"></div>
         <div class="camera-panel">
@@ -353,11 +400,7 @@ INDEX_HTML = """<!doctype html>
             <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
             <button onclick="refreshCameraHub(true)">Refresh cameras</button>
             <button onclick="startCameraPreview()">Start live</button>
-          </div>
-          <div class="camera-controls">
-            <div></div>
             <button onclick="stopCameraPreview()">Stop live</button>
-            <div></div>
           </div>
           <div class="camera-view">
             <img id="cameraImage" alt="Camera preview">
@@ -376,19 +419,11 @@ INDEX_HTML = """<!doctype html>
           <div>IP</div><div id="ip"></div>
           <div>Variant</div><div id="variant"></div>
           <div>Port</div><div id="port"></div>
-          <div>Connected</div><div id="connected"></div>
           <div>Gravity</div><div id="gravity"></div>
           <div>Max speed</div><div><span id="speedValue"></span> rad/s</div>
-          <div>Payload gravity</div><div id="payloadGravity"></div>
-          <div>Wrist comp</div><div><span id="wristEffortValue"></span> Nm</div>
         </div>
         <input id="speedSlider" type="range" min="0.05" max="1.5" step="0.05" value="0.3" oninput="setMaxSpeed(this.value)">
         <p class="camera-note">Home, Rest, Demo, Return to start and replay follow this speed limit. Default is 0.30 rad/s.</p>
-        <select id="payloadProfile" onchange="setGravityControls()">
-          <option value="d405_follower">D405 / follower profile</option>
-          <option value="variant">Current variant profile</option>
-        </select>
-        <input id="wristEffortSlider" type="range" min="-0.6" max="0.6" step="0.02" value="0" oninput="setGravityControls()">
         <h2 class="side-title">Log</h2>
         <pre id="log"></pre>
       </aside>
@@ -463,21 +498,34 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('ip').textContent = config.ip;
       document.getElementById('variant').textContent = config.variant;
       document.getElementById('port').textContent = config.port;
-      document.getElementById('connected').textContent = data.connected ? 'yes' : 'no';
       document.getElementById('gravity').textContent = data.gravity_compensation ? 'on' : 'off';
+      document.getElementById('gripperStatus').textContent = formatGripperStatus(data.gripper_position);
       document.getElementById('holdButton').textContent = data.hold ? 'Hold off' : 'Hold';
       document.getElementById('speedValue').textContent = Number(data.max_speed).toFixed(2);
       document.getElementById('speedSlider').value = data.max_speed;
-      document.getElementById('payloadGravity').textContent = data.gravity_payload_profile === 'd405_follower'
-        ? 'D405/follower'
-        : 'variant';
-      document.getElementById('payloadProfile').value = data.gravity_payload_profile;
-      document.getElementById('wristEffortValue').textContent = Number(data.camera_wrist_effort).toFixed(2);
-      document.getElementById('wristEffortSlider').value = data.camera_wrist_effort;
       document.getElementById('state').textContent = data.connected ? 'Connected' : 'Disconnected';
       const dot = document.getElementById('dot');
       dot.className = 'dot ' + (data.connected ? 'ok' : (config.real ? '' : 'warn'));
       renderJoints();
+    }
+
+    function formatGripperStatus(position) {
+      if (position == null || !Number.isFinite(Number(position))) return 'n/a';
+      const meters = Number(position);
+      const mm = meters * 1000;
+      return `${mm.toFixed(1)} mm open`;
+    }
+
+    function setBackendOffline(message = 'No backend') {
+      document.getElementById('subtitle').textContent = message;
+      document.getElementById('mode').textContent = 'OFFLINE';
+      document.getElementById('state').textContent = 'No backend';
+      document.getElementById('dot').className = 'dot';
+      document.getElementById('cameraState').textContent = 'No backend';
+      document.getElementById('cameraDetail').textContent = 'Restart the control server';
+      document.getElementById('gripperStatus').textContent = 'n/a';
+      cameraRunning = false;
+      stopCameraElement();
     }
 
     async function setMaxSpeed(value) {
@@ -494,17 +542,9 @@ INDEX_HTML = """<!doctype html>
     function gravityPayload() {
       return {
         armed: document.getElementById('armed').checked,
-        payload_profile: document.getElementById('payloadProfile').value,
-        camera_wrist_effort: Number(document.getElementById('wristEffortSlider').value)
+        payload_profile: 'd405_follower',
+        camera_wrist_effort: 0.0
       };
-    }
-
-    function setGravityControls() {
-      const effort = Number(document.getElementById('wristEffortSlider').value);
-      document.getElementById('wristEffortValue').textContent = effort.toFixed(2);
-      document.getElementById('payloadGravity').textContent = document.getElementById('payloadProfile').value === 'd405_follower'
-        ? 'D405/follower'
-        : 'variant';
     }
 
     async function refreshStatus(writeLog = true) {
@@ -513,6 +553,7 @@ INDEX_HTML = """<!doctype html>
         updateStatus(data);
         if (writeLog) log('Status updated');
       } catch (err) {
+        setBackendOffline();
         log(`ERROR: ${err.message}`);
       }
     }
@@ -572,8 +613,7 @@ INDEX_HTML = """<!doctype html>
         if (writeLog) log(data.message);
         updateCameraView();
       } catch (err) {
-        document.getElementById('cameraState').textContent = 'Camera error';
-        document.getElementById('cameraDetail').textContent = '';
+        setBackendOffline();
         log(`ERROR camera: ${err.message}`);
       }
     }
@@ -716,6 +756,26 @@ INDEX_HTML = """<!doctype html>
         log(data.message);
       } catch (err) {
         log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function saveStartPosition() {
+      try {
+        const data = await api('/api/start_position/save', {});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR start position: ${err.message}`);
+      }
+    }
+
+    async function goToStartPosition() {
+      try {
+        const data = await api('/api/start_position/go', {armed: document.getElementById('armed').checked});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR start position: ${err.message}`);
       }
     }
 
@@ -1349,10 +1409,28 @@ TEACH_HTML = """<!doctype html>
       padding: 18px;
     }
     .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .toolbar-block {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-bottom: 18px;
+      align-items: center;
+      padding: 12px;
+      background: #111518;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .toolbar-title {
+      min-width: 90px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
     button {
       height: 40px;
@@ -1752,6 +1830,19 @@ TEACH_HTML = """<!doctype html>
       background: #ff5f5f;
       box-shadow: 0 0 0 4px rgba(255, 95, 95, 0.18);
     }
+    .status-pill.ok {
+      color: #d7f7ea;
+      border-color: #2b8c67;
+      background: #112019;
+    }
+    .status-pill.ok .status-led {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(55, 196, 141, 0.18);
+    }
+    .status-pill.warn .status-led {
+      background: var(--warning);
+      box-shadow: 0 0 0 4px rgba(230, 180, 80, 0.18);
+    }
     .inline-preview {
       margin-top: 14px;
     }
@@ -1795,7 +1886,7 @@ TEACH_HTML = """<!doctype html>
       header { align-items: stretch; flex-direction: column; }
       .layout { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
-      .hero, .control-grid, .preview-grid, .settings-grid, .camera-control-row, .review-head, .capture-settings-grid { grid-template-columns: 1fr; }
+      .toolbar, .hero, .control-grid, .preview-grid, .settings-grid, .camera-control-row, .review-head, .capture-settings-grid { grid-template-columns: 1fr; }
       .capture-row { grid-template-columns: 1fr; }
       .review-controls { grid-template-columns: 1fr; }
       .frame-controls { grid-template-columns: 1fr; }
@@ -1816,34 +1907,26 @@ TEACH_HTML = """<!doctype html>
     <div class="layout">
       <section>
         <div class="toolbar">
-          <button class="primary" onclick="connectArm()">Connect</button>
-          <button class="danger" onclick="disconnectArm()">Disconnect</button>
-          <button onclick="gripper(10)">Open gripper</button>
-          <button onclick="gripper(-10)">Close gripper</button>
-          <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
-        </div>
-        <div class="teaching-shell">
-          <div class="hero">
-            <div class="hero-card">
-              <h2 class="hero-title">Workflow ACT minimal</h2>
-              <div class="hero-copy">
-                Meme depart, demo manuelle, replay propre, puis verification visuelle. Cette page est maintenant centree sur ce flux et non sur l'outil Trossen officiel.
-              </div>
-              <div class="hero-points">
-                <div><strong>Top cam:</strong> Logitech Brio 500 `usb:0` pour la vue scene.</div>
-                <div><strong>Poignet:</strong> D405 RGB et depth capturees pendant le replay dataset.</div>
-                <div><strong>But:</strong> produire des episodes courts et propres pour un premier `push_cube_5cm`.</div>
-              </div>
-            </div>
-            <div class="hero-card">
-              <div class="hero-actions">
-                <button class="danger emergency-inline" onclick="emergencyStop()">Emergency stop</button>
-                <button onclick="gravityCompensation()">Gravity comp</button>
-                <button id="holdButton" onclick="toggleHold()">Hold</button>
-                <div class="utility-note">Le module Trossen officiel reste disponible en backend, mais il n'est plus affiche ici tant que tu ne l'utilises pas.</div>
-              </div>
+          <div class="toolbar-block">
+            <span class="toolbar-title">Session</span>
+            <button class="primary" onclick="connectArm()">Connect</button>
+            <button class="danger" onclick="disconnectArm()">Disconnect</button>
+            <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
+            <div class="status-pill warn" id="teachConnectionPill">
+              <span class="status-led"></span>
+              <span id="teachConnectionText">Disconnected</span>
             </div>
           </div>
+          <div class="toolbar-block">
+            <span class="toolbar-title">Quick tools</span>
+            <button class="danger emergency-inline" onclick="emergencyStop()">Emergency stop</button>
+            <button onclick="gravityCompensation()">Gravity comp</button>
+            <button id="holdButton" onclick="toggleHold()">Hold</button>
+            <button onclick="gripper(10)">Open gripper</button>
+            <button onclick="gripper(-10)">Close gripper</button>
+          </div>
+        </div>
+        <div class="teaching-shell">
           <input id="cameraMode" type="hidden" value="color">
           <input id="payloadProfile" type="hidden" value="d405_follower">
           <input id="wristEffortSlider" type="hidden" value="0">
@@ -2071,7 +2154,6 @@ TEACH_HTML = """<!doctype html>
       <aside>
         <h2 class="side-title">Status</h2>
         <div class="kv">
-          <div>Arm</div><div id="armState">-</div>
           <div>Camera</div><div id="cameraState">-</div>
           <div>Start pos</div><div id="startPoseState">-</div>
           <div>Record</div><div id="recordState">-</div>
@@ -2176,7 +2258,9 @@ TEACH_HTML = """<!doctype html>
     async function refreshAll(writeLog = false) {
       try {
         const arm = await api('/api/status');
-        document.getElementById('armState').textContent = arm.connected ? 'Connected' : 'Disconnected';
+        const pill = document.getElementById('teachConnectionPill');
+        document.getElementById('teachConnectionText').textContent = arm.connected ? 'Connected' : 'Disconnected';
+        pill.className = 'status-pill ' + (arm.connected ? 'ok' : 'warn');
         document.getElementById('startPoseState').textContent = arm.start_position_saved
           ? `Saved · ${arm.start_position_label || 'ready'}`
           : 'Not saved';
