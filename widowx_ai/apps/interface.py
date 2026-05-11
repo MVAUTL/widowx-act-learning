@@ -2009,6 +2009,9 @@ TEACH_HTML = """<!doctype html>
       gap: 14px;
       margin-top: 0;
     }
+    .preview-grid.four-up {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
     .preview-panel {
       background: #151a1e;
       border: 1px solid var(--line);
@@ -2141,7 +2144,7 @@ TEACH_HTML = """<!doctype html>
       header { align-items: stretch; flex-direction: column; }
       .layout { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
-      .toolbar, .hero, .control-grid, .preview-grid, .settings-grid, .camera-control-row, .review-head, .capture-settings-grid { grid-template-columns: 1fr; }
+      .toolbar, .hero, .control-grid, .preview-grid, .preview-grid.four-up, .settings-grid, .camera-control-row, .review-head, .capture-settings-grid { grid-template-columns: 1fr; }
       .capture-row { grid-template-columns: 1fr; }
       .review-controls { grid-template-columns: 1fr; }
       .frame-controls { grid-template-columns: 1fr; }
@@ -2231,13 +2234,21 @@ TEACH_HTML = """<!doctype html>
                     </div>
                   </div>
                   <div class="preview-panel inline-preview" style="border: none; padding: 0; background: transparent; margin-top: 0;">
-                    <div class="preview-grid">
+                    <div class="preview-grid four-up">
                       <div class="preview-panel compact selectable" id="previewPanelTop" onclick="selectCropRole('top_view')">
                         <h3 class="preview-title">Top camera</h3>
                         <div class="camera-view">
                           <img id="cameraImageTop" alt="Top camera live preview" onload="recordFrame('top_view')" onerror="clearPendingFrame('top_view')">
                           <span class="fps-counter" id="fpsTop" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
                           <span id="cameraPlaceholderTop">Camera inactive</span>
+                        </div>
+                      </div>
+                      <div class="preview-panel compact selectable" id="previewPanelFront" onclick="selectCropRole('front')">
+                        <h3 class="preview-title">Front camera</h3>
+                        <div class="camera-view">
+                          <img id="cameraImageFront" alt="Front camera live preview" onload="recordFrame('front')" onerror="clearPendingFrame('front')">
+                          <span class="fps-counter" id="fpsFront" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
+                          <span id="cameraPlaceholderFront">Camera inactive</span>
                         </div>
                       </div>
                       <div class="preview-panel compact selectable" id="previewPanelWristRgb" onclick="selectCropRole('wrist_rgb')">
@@ -2272,14 +2283,20 @@ TEACH_HTML = """<!doctype html>
                     <label>Top camera source</label>
                     <select id="teachCameraSource" onchange="updateCaptureSummary(); updateCameraFrame();"></select>
                   </div>
+                  <div class="field" id="frontCameraSelectorField" style="display: none;">
+                    <label>Front camera source</label>
+                    <select id="frontCameraSource" onchange="updateCaptureSummary(); updateCameraFrame();"></select>
+                  </div>
                   <div class="field">
                     <label><input id="datasetCropEnabled" type="checkbox" onchange="updateCaptureSummary(); updateCameraFrame();"> Crop video flux</label>
                     <div class="crop-grid">
                       <div>
-                        <label>Apply crop to</label>
+                    <label>Apply crop to</label>
                         <select id="datasetCropTarget" onchange="updateCaptureSummary(); updateCameraFrame();">
                           <option value="all" selected>All cameras</option>
+                          <option value="usb">Top + front cameras</option>
                           <option value="top">Top camera</option>
+                          <option value="front">Front camera</option>
                           <option value="d405">D405 RGB/depth</option>
                         </select>
                       </div>
@@ -2372,9 +2389,12 @@ TEACH_HTML = """<!doctype html>
                   <label>Cameras for ACT</label>
                   <select id="actCameras" onchange="refreshActPlan(false)">
                     <option value="top_view,wrist_rgb" selected>top_view + wrist_rgb</option>
+                    <option value="front,wrist_rgb">front + wrist_rgb</option>
+                    <option value="top_view,front,wrist_rgb">top_view + front + wrist_rgb</option>
                     <option value="top_view">top_view only</option>
+                    <option value="front">front only</option>
                     <option value="wrist_rgb">wrist_rgb only</option>
-                    <option value="top_view,wrist_rgb,wrist_depth">top_view + wrist_rgb + wrist_depth</option>
+                    <option value="top_view,front,wrist_rgb,wrist_depth">top_view + front + wrist_rgb + wrist_depth</option>
                   </select>
                 </div>
                 <div class="field">
@@ -2437,12 +2457,19 @@ TEACH_HTML = """<!doctype html>
             </div>
             <div class="preview-panel compact">
               <h3 class="preview-title">Selected recording</h3>
-              <div class="preview-grid">
+              <div class="preview-grid four-up">
                 <div class="preview-panel">
                   <h3 class="preview-title">Top camera</h3>
                   <div class="camera-view">
                     <img id="reviewImageTop" alt="Recorded top camera preview">
                     <span id="reviewPlaceholderTop">No recording selected</span>
+                  </div>
+                </div>
+                <div class="preview-panel">
+                  <h3 class="preview-title">Front camera</h3>
+                  <div class="camera-view">
+                    <img id="reviewImageFront" alt="Recorded front camera preview">
+                    <span id="reviewPlaceholderFront">No recording selected</span>
                   </div>
                 </div>
                 <div class="preview-panel">
@@ -2505,10 +2532,15 @@ TEACH_HTML = """<!doctype html>
     let reviewPlaybackTimer = null;
     let lastDatasetRunning = false;
     let activeCropRole = 'all';
-    let cameraCaptureState = { top_view: true, wrist_rgb: true, wrist_depth: true };
-    let fpsCounters = { top_view: { count: 0, lastTime: Date.now(), fps: 0 }, wrist_rgb: { count: 0, lastTime: Date.now(), fps: 0 }, wrist_depth: { count: 0, lastTime: Date.now(), fps: 0 } };
-    let pendingFrames = { top_view: false, wrist_rgb: false, wrist_depth: false };
-    let resolutionState = { top_view: "640x480", d405: "640x480" };
+    let cameraCaptureState = { top_view: true, front: false, wrist_rgb: true, wrist_depth: true };
+    let fpsCounters = {
+      top_view: { count: 0, lastTime: Date.now(), fps: 0 },
+      front: { count: 0, lastTime: Date.now(), fps: 0 },
+      wrist_rgb: { count: 0, lastTime: Date.now(), fps: 0 },
+      wrist_depth: { count: 0, lastTime: Date.now(), fps: 0 }
+    };
+    let pendingFrames = { top_view: false, front: false, wrist_rgb: false, wrist_depth: false };
+    let resolutionState = { top_view: "640x480", front: "640x480", d405: "640x480" };
 
     function populateResolutions() {
       const resSelect = document.getElementById('cameraResolution');
@@ -2524,13 +2556,13 @@ TEACH_HTML = """<!doctype html>
         option.textContent = opt;
         resSelect.appendChild(option);
       });
-      resSelect.value = resolutionState[isD405 ? 'd405' : 'top_view'];
+      resSelect.value = resolutionState[isD405 ? 'd405' : activeCropRole === 'front' ? 'front' : 'top_view'];
     }
 
     function updateCameraResolution() {
       if (!activeCropRole) return;
       const isD405 = activeCropRole === 'wrist_rgb' || activeCropRole === 'wrist_depth';
-      resolutionState[isD405 ? 'd405' : 'top_view'] = document.getElementById('cameraResolution').value;
+      resolutionState[isD405 ? 'd405' : activeCropRole === 'front' ? 'front' : 'top_view'] = document.getElementById('cameraResolution').value;
       updateCaptureSummary();
     }
 
@@ -2547,7 +2579,7 @@ TEACH_HTML = """<!doctype html>
         counter.fps = counter.count;
         counter.count = 0;
         counter.lastTime = now;
-        const elId = role === 'top_view' ? 'fpsTop' : (role === 'wrist_rgb' ? 'fpsWristRgb' : 'fpsWristDepth');
+        const elId = role === 'top_view' ? 'fpsTop' : role === 'front' ? 'fpsFront' : (role === 'wrist_rgb' ? 'fpsWristRgb' : 'fpsWristDepth');
         const el = document.getElementById(elId);
         if (el) el.textContent = `${counter.fps} FPS`;
       }
@@ -2728,7 +2760,7 @@ TEACH_HTML = """<!doctype html>
 
     function updateCameraLoop() {
       const views = livePreviewViews();
-      if (cameraRunning && selectedTeachCameraSource()) {
+      if (cameraRunning && (selectedTeachCameraSource() || selectedFrontCameraSource())) {
         views.forEach((view) => {
           const enabled = cameraCaptureState[view.role] !== false;
           view.img.style.display = enabled ? 'block' : 'none';
@@ -2741,7 +2773,7 @@ TEACH_HTML = """<!doctype html>
         views.forEach((view) => {
           view.img.style.display = 'none';
           view.placeholder.style.display = 'block';
-          view.placeholder.textContent = selectedTeachCameraSource() ? 'Camera inactive' : 'No camera selected';
+          view.placeholder.textContent = view.source ? 'Camera inactive' : 'No camera selected';
         });
         if (cameraTimer) {
           clearInterval(cameraTimer);
@@ -2758,6 +2790,14 @@ TEACH_HTML = """<!doctype html>
       return teachCameraSources.length ? teachCameraSources[0].id : '';
     }
 
+    function preferredFrontCameraSource(topSource = '') {
+      const front = teachCameraSources.find((source) => String(source.label || '').toLowerCase().includes('front'));
+      if (front && front.id !== topSource) return front.id;
+      const otherUsb = teachCameraSources.find((source) => source.id !== topSource && source.id.startsWith('usb:'));
+      if (otherUsb) return otherUsb.id;
+      return topSource || preferredTopCameraSource();
+    }
+
     function teachCameraOptionLabel(source) {
       if (source.id === 'usb:0') {
         return `${source.label} · top cam par defaut`;
@@ -2767,29 +2807,41 @@ TEACH_HTML = """<!doctype html>
 
     function renderTeachCameraSources(sources, activeSource) {
       const select = document.getElementById('teachCameraSource');
+      const frontSelect = document.getElementById('frontCameraSource');
       const previous = select.value;
+      const previousFront = frontSelect ? frontSelect.value : '';
       teachCameraSources = Array.isArray(sources) ? sources : [];
       select.innerHTML = '';
+      if (frontSelect) frontSelect.innerHTML = '';
       if (teachCameraSources.length === 0) {
         const option = document.createElement('option');
         option.value = '';
         option.textContent = 'No camera detected';
         select.appendChild(option);
+        if (frontSelect) frontSelect.appendChild(option.cloneNode(true));
         select.disabled = true;
+        if (frontSelect) frontSelect.disabled = true;
         activeTeachCameraSource = '';
         updateCaptureSummary();
         return;
       }
       select.disabled = false;
+      if (frontSelect) frontSelect.disabled = false;
       teachCameraSources.forEach((source) => {
         const option = document.createElement('option');
         option.value = source.id;
         option.textContent = teachCameraOptionLabel(source);
         select.appendChild(option);
+        if (frontSelect) frontSelect.appendChild(option.cloneNode(true));
       });
       const preferred = preferredTopCameraSource() || previous || activeSource;
       const exists = teachCameraSources.some((source) => source.id === preferred);
       select.value = exists ? preferred : preferredTopCameraSource();
+      if (frontSelect) {
+        const preferredFront = previousFront || preferredFrontCameraSource(select.value);
+        const frontExists = teachCameraSources.some((source) => source.id === preferredFront);
+        frontSelect.value = frontExists ? preferredFront : preferredFrontCameraSource(select.value);
+      }
       activeTeachCameraSource = select.value;
       updateCaptureSummary();
     }
@@ -2799,9 +2851,15 @@ TEACH_HTML = """<!doctype html>
       return value || '';
     }
 
+    function selectedFrontCameraSource() {
+      const value = document.getElementById('frontCameraSource')?.value;
+      return value || '';
+    }
+
     function cropRoleLabel(role) {
       if (role === 'all') return 'All cameras';
       if (role === 'top_view') return 'Top camera';
+      if (role === 'front') return 'Front camera';
       if (role === 'wrist_rgb') return 'D405 RGB';
       if (role === 'wrist_depth') return 'D405 depth';
       return 'Click a preview';
@@ -2814,7 +2872,11 @@ TEACH_HTML = """<!doctype html>
 
       const topCamField = document.getElementById('topCameraSelectorField');
       if (topCamField) {
-        topCamField.style.display = (role === 'top_view') ? 'block' : 'none';
+        topCamField.style.display = role === 'top_view' ? 'block' : 'none';
+      }
+      const frontCamField = document.getElementById('frontCameraSelectorField');
+      if (frontCamField) {
+        frontCamField.style.display = role === 'front' ? 'block' : 'none';
       }
 
       populateResolutions();
@@ -2826,9 +2888,11 @@ TEACH_HTML = """<!doctype html>
 
       const enabled = document.getElementById('datasetCropEnabled');
       if (enabled) enabled.checked = true;
-      ['top_view', 'wrist_rgb', 'wrist_depth'].forEach((candidate) => {
+      ['top_view', 'front', 'wrist_rgb', 'wrist_depth'].forEach((candidate) => {
         const elementId = candidate === 'top_view'
           ? 'previewPanelTop'
+          : candidate === 'front'
+          ? 'previewPanelFront'
           : candidate === 'wrist_rgb'
           ? 'previewPanelWristRgb'
           : 'previewPanelWristDepth';
@@ -2846,6 +2910,12 @@ TEACH_HTML = """<!doctype html>
           role: 'top_view',
           img: document.getElementById('cameraImageTop'),
           placeholder: document.getElementById('cameraPlaceholderTop')
+        },
+        {
+          source: selectedFrontCameraSource(),
+          role: 'front',
+          img: document.getElementById('cameraImageFront'),
+          placeholder: document.getElementById('cameraPlaceholderFront')
         },
         {
           source: 'd405:color',
@@ -2902,11 +2972,14 @@ TEACH_HTML = """<!doctype html>
       const replaySpeed = Number(document.getElementById('replaySpeed')?.value || 0.75).toFixed(2);
       const taskName = document.getElementById('datasetTaskName')?.value.trim() || 'no task label';
       const sourceName = selectedTeachCameraLabel();
+      const frontSource = selectedFrontCameraSource();
+      const frontSourceName = teachCameraSources.find((item) => item.id === frontSource)?.label || frontSource || 'None';
       const cropText = cropEnabled
         ? `${cropTarget}, ratio ${cropAspect}, zoom ${cropZoom}x, x ${cropX}, y ${cropY}`
         : 'disabled';
       preview.innerHTML = `
         <div><strong>Top camera:</strong> ${cameraCaptureState.top_view ? escapeHtml(sourceName) + ' (' + resolutionState.top_view + ')' : 'disabled'}</div>
+        <div><strong>Front camera:</strong> ${cameraCaptureState.front ? escapeHtml(frontSourceName) + ' (' + resolutionState.front + ')' : 'disabled'}</div>
         <div><strong>D405:</strong> ${cameraCaptureState.wrist_rgb ? 'RGB ' : ''}${cameraCaptureState.wrist_depth ? 'Depth' : ''}${!cameraCaptureState.wrist_rgb && !cameraCaptureState.wrist_depth ? 'disabled' : ''} (${resolutionState.d405})</div>
         <div><strong>Selected crop preview:</strong> ${escapeHtml(cropRoleLabel(activeCropRole))}</div>
         <div><strong>Crop:</strong> ${escapeHtml(cropText)}</div>
@@ -3075,23 +3148,29 @@ TEACH_HTML = """<!doctype html>
     async function startCamera() {
       try {
         const source = selectedTeachCameraSource();
-        if (!source) {
+        const frontSource = selectedFrontCameraSource();
+        if (!source && !frontSource) {
           log('ERROR camera: select a camera first');
           return;
         }
         
         const topRes = resolutionState.top_view || "640x480";
+        const frontRes = resolutionState.front || "640x480";
         const d405Res = resolutionState.d405 || "640x480";
         const [topW, topH] = topRes.split('x').map(Number);
+        const [frontW, frontH] = frontRes.split('x').map(Number);
         const [d405W, d405H] = d405Res.split('x').map(Number);
 
-        if (source.startsWith('usb:')) {
+        if (source && source.startsWith('usb:')) {
           await api('/api/usb_cameras/start', {index: source.split(':')[1], width: topW, height: topH});
-        } else {
+        } else if (source) {
           await api('/api/video/start', {source, width: topW, height: topH});
         }
+        if (cameraCaptureState.front && frontSource && frontSource.startsWith('usb:')) {
+          await api('/api/usb_cameras/start', {index: frontSource.split(':')[1], width: frontW, height: frontH});
+        }
         await api('/api/camera/start', {mode: 'color', width: d405W, height: d405H});
-        log(`Camera preview started. Top cam: ${topW}x${topH}, D405: ${d405W}x${d405H}`);
+        log(`Camera preview started. Top cam: ${topW}x${topH}, front: ${frontW}x${frontH}, D405: ${d405W}x${d405H}`);
         await refreshAll(false);
       } catch (err) {
         log(`ERROR camera: ${err.message}`);
@@ -3172,8 +3251,14 @@ TEACH_HTML = """<!doctype html>
     function datasetCropConfig(role) {
       const enabled = document.getElementById('datasetCropEnabled').checked;
       const rawTarget = document.getElementById('datasetCropTarget').value;
-      const target = ['all', 'top', 'd405'].includes(rawTarget) ? rawTarget : 'all';
-      const applies = enabled && (target === 'all' || (target === 'top' && role === 'top_view') || (target === 'd405' && role !== 'top_view'));
+      const target = ['all', 'usb', 'top', 'front', 'd405'].includes(rawTarget) ? rawTarget : 'all';
+      const applies = enabled && (
+        target === 'all'
+        || (target === 'usb' && (role === 'top_view' || role === 'front'))
+        || (target === 'top' && role === 'top_view')
+        || (target === 'front' && role === 'front')
+        || (target === 'd405' && role !== 'top_view' && role !== 'front')
+      );
       if (!applies) return null;
       return {
         enabled: true,
@@ -3192,7 +3277,8 @@ TEACH_HTML = """<!doctype html>
       }
       try {
         const source = selectedTeachCameraSource();
-        if (!source) {
+        const frontSource = selectedFrontCameraSource();
+        if (!source && !frontSource) {
           log('ERROR dataset: select a capture camera');
           return;
         }
@@ -3203,6 +3289,7 @@ TEACH_HTML = """<!doctype html>
           video_source: source,
           capture_sources: [
             cameraCaptureState.top_view ? {source, role: 'top_view', crop: datasetCropConfig('top_view')} : null,
+            cameraCaptureState.front ? {source: frontSource, role: 'front', crop: datasetCropConfig('front')} : null,
             cameraCaptureState.wrist_rgb ? {source: 'd405:color', role: 'wrist_rgb', crop: datasetCropConfig('wrist_rgb')} : null,
             cameraCaptureState.wrist_depth ? {source: 'd405:depth', role: 'wrist_depth', crop: datasetCropConfig('wrist_depth')} : null
           ].filter(Boolean),
@@ -3211,7 +3298,7 @@ TEACH_HTML = """<!doctype html>
           action_offset: 1,
           lerobot_features: {
             state: 'observation.state',
-            images: ['observation.images.top_view', 'observation.images.wrist_rgb'],
+            images: ['observation.images.top_view', 'observation.images.front', 'observation.images.wrist_rgb'],
             action: 'nearest future motor state for ACT action chunking'
           },
           armed: document.getElementById('armed').checked
@@ -3430,12 +3517,15 @@ TEACH_HTML = """<!doctype html>
       const frame = reviewFrames[reviewIndex];
       const topImg = document.getElementById('reviewImageTop');
       const topPlaceholder = document.getElementById('reviewPlaceholderTop');
+      const frontImg = document.getElementById('reviewImageFront');
+      const frontPlaceholder = document.getElementById('reviewPlaceholderFront');
       const wristRgbImg = document.getElementById('reviewImageWristRgb');
       const wristRgbPlaceholder = document.getElementById('reviewPlaceholderWristRgb');
       const wristDepthImg = document.getElementById('reviewImageWristDepth');
       const wristDepthPlaceholder = document.getElementById('reviewPlaceholderWristDepth');
       const images = frame.images || {};
       const topImage = images.top_view || frame.image;
+      const frontImage = images.front || null;
       const wristRgbImage = images.wrist_rgb || null;
       const wristDepthImage = images.wrist_depth || null;
       if (topImage) {
@@ -3446,6 +3536,15 @@ TEACH_HTML = """<!doctype html>
         topImg.style.display = 'none';
         topPlaceholder.style.display = 'block';
         topPlaceholder.textContent = 'No top-view image';
+      }
+      if (frontImage) {
+        frontImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(frontImage)}&t=${Date.now()}`;
+        frontImg.style.display = 'block';
+        frontPlaceholder.style.display = 'none';
+      } else {
+        frontImg.style.display = 'none';
+        frontPlaceholder.style.display = 'block';
+        frontPlaceholder.textContent = 'No front image';
       }
       if (wristRgbImage) {
         wristRgbImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(wristRgbImage)}&t=${Date.now()}`;
@@ -3489,6 +3588,9 @@ TEACH_HTML = """<!doctype html>
       document.getElementById('reviewImageTop').style.display = 'none';
       document.getElementById('reviewPlaceholderTop').style.display = 'block';
       document.getElementById('reviewPlaceholderTop').textContent = message;
+      document.getElementById('reviewImageFront').style.display = 'none';
+      document.getElementById('reviewPlaceholderFront').style.display = 'block';
+      document.getElementById('reviewPlaceholderFront').textContent = message;
       document.getElementById('reviewImageWristRgb').style.display = 'none';
       document.getElementById('reviewPlaceholderWristRgb').style.display = 'block';
       document.getElementById('reviewPlaceholderWristRgb').textContent = message;
@@ -3595,6 +3697,8 @@ class CameraController:
         self.usb_capture: Any | None = None
         self.usb_index: int | None = None
         self.usb_label: str | None = None
+        self.usb_captures: dict[int, Any] = {}
+        self.usb_labels: dict[int, str] = {}
         self.usb_last_message = "USB camera ready"
 
     @staticmethod
@@ -3765,11 +3869,11 @@ class CameraController:
         self._require_deps()
         cameras: list[dict[str, Any]] = []
         for index in self._video_device_indices():
-            if self.usb_capture is not None and self.usb_index == index and self.usb_label:
+            if index in self.usb_captures and self.usb_labels.get(index):
                 cameras.append(
                     {
                         "index": index,
-                        "label": self.usb_label,
+                        "label": self.usb_labels[index],
                         "device": f"/dev/video{index}",
                     }
                 )
@@ -3866,10 +3970,11 @@ class CameraController:
             return {
                 "ok": True,
                 "cameras": cameras,
-                "running": self.usb_capture is not None,
+                "running": bool(self.usb_captures),
                 "active_index": self.usb_index,
                 "active_label": self.usb_label,
                 "active_device": f"/dev/video{self.usb_index}" if self.usb_index is not None else "",
+                "active_indices": sorted(self.usb_captures),
                 "message": message,
             }
 
@@ -3881,7 +3986,7 @@ class CameraController:
             active_detail = ""
             if self.pipeline is not None:
                 active_source = f"d405:{self.mode}"
-            elif self.usb_capture is not None and self.usb_index is not None:
+            elif self.usb_captures and self.usb_index is not None:
                 active_source = f"usb:{self.usb_index}"
             for source in sources:
                 if source["id"] == active_source:
@@ -3953,17 +4058,18 @@ class CameraController:
             label = self._usb_device_label(index)
             if not label:
                 raise RuntimeError("Selected camera is reserved for RealSense and not shown here.")
-            if self.usb_capture is not None and self.usb_index == index:
+            if index in self.usb_captures:
                 self.usb_last_message = f"USB camera already running: {label}"
+                self.usb_index = index
+                self.usb_label = label
                 return self.usb_status_unlocked(self.usb_last_message)
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
             capture = self._probe_usb_capture(f"/dev/video{index}", width, height)
             if capture is None:
                 raise RuntimeError(
                     f"Unable to open /dev/video{index}. Another app may own it, or this node is not a capture stream."
                 )
+            self.usb_captures[index] = capture
+            self.usb_labels[index] = label
             self.usb_capture = capture
             self.usb_index = index
             self.usb_label = label
@@ -3972,9 +4078,11 @@ class CameraController:
 
     def usb_stop(self) -> dict[str, Any]:
         with self.lock:
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
+            for capture in self.usb_captures.values():
+                capture.release()
+            self.usb_captures.clear()
+            self.usb_labels.clear()
+            self.usb_capture = None
             self.usb_index = None
             self.usb_label = None
             self.usb_last_message = "USB camera stopped"
@@ -3985,11 +4093,6 @@ class CameraController:
         width = int(payload.get("width", 640))
         height = int(payload.get("height", 480))
         if kind == "d405":
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
-                self.usb_index = None
-                self.usb_label = None
             self.start({"mode": value, "width": width, "height": height})
         else:
             if self.pipeline is not None:
@@ -4004,12 +4107,14 @@ class CameraController:
                 self.pipeline.stop()
                 self.pipeline = None
                 self.last_message = "Camera preview stopped"
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
-                self.usb_index = None
-                self.usb_label = None
-                self.usb_last_message = "Camera preview stopped"
+            for capture in self.usb_captures.values():
+                capture.release()
+            self.usb_captures.clear()
+            self.usb_labels.clear()
+            self.usb_capture = None
+            self.usb_index = None
+            self.usb_label = None
+            self.usb_last_message = "Camera preview stopped"
         return self.video_status()
 
     def set_mode(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -4031,16 +4136,17 @@ class CameraController:
 
     def usb_status_unlocked(self, message: str) -> dict[str, Any]:
         cameras = self._usb_cameras_unlocked()
-        if self.usb_index is not None and not any(camera["index"] == self.usb_index for camera in cameras):
+        if self.usb_index is not None and self.usb_index not in self.usb_captures and not any(camera["index"] == self.usb_index for camera in cameras):
             self.usb_index = None
             self.usb_label = None
         return {
             "ok": True,
             "cameras": cameras,
-            "running": self.usb_capture is not None,
+            "running": bool(self.usb_captures),
             "active_index": self.usb_index,
             "active_label": self.usb_label,
             "active_device": f"/dev/video{self.usb_index}" if self.usb_index is not None else "",
+            "active_indices": sorted(self.usb_captures),
             "message": message,
         }
 
@@ -4074,9 +4180,10 @@ class CameraController:
         index = self._validate_usb_index(raw_index)
         with self.lock:
             self._require_deps()
-            if self.usb_capture is None or self.usb_index != index:
+            capture = self.usb_captures.get(index)
+            if capture is None:
                 raise RuntimeError("USB camera preview is not running for the selected device.")
-            ok, frame = self.usb_capture.read()
+            ok, frame = capture.read()
             if not ok or frame is None:
                 raise RuntimeError(f"No frame received from USB camera {index}.")
             frame = self._apply_crop(frame, crop)
@@ -5816,7 +5923,7 @@ class ActDatasetPlanner:
     @staticmethod
     def _camera_list(raw_cameras: Any) -> list[str]:
         cameras = [item.strip() for item in str(raw_cameras or "top_view,wrist_rgb").split(",") if item.strip()]
-        allowed = {"top_view", "wrist_rgb", "wrist_depth"}
+        allowed = {"top_view", "front", "wrist_rgb", "wrist_depth"}
         unknown = [camera for camera in cameras if camera not in allowed]
         if unknown:
             raise RuntimeError(f"Unknown ACT camera(s): {', '.join(unknown)}.")
