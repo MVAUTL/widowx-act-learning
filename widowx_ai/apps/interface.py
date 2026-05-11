@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 import math
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -1016,6 +1017,60 @@ MODEL_TEST_HTML = """<!doctype html>
       margin-right: 6px;
       vertical-align: -1px;
     }
+    .camera-panel {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .camera-controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    select {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .camera-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .camera-note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
     @media (max-width: 880px) {
       header { align-items: stretch; flex-direction: column; }
       .layout, .grid { grid-template-columns: 1fr; }
@@ -1042,7 +1097,7 @@ MODEL_TEST_HTML = """<!doctype html>
         <div class="grid">
           <div class="field">
             <label>Checkpoint</label>
-            <input id="checkpoint" type="text" value="widowx_ai/models/act_100ep_20260430_0520/best.pt">
+            <input id="checkpoint" type="text" value="/home/mvautl/Documents/Stage/widowx_ai/models/checkpoint_last">
           </div>
           <div class="field">
             <label>Steps</label>
@@ -1114,6 +1169,23 @@ MODEL_TEST_HTML = """<!doctype html>
           <span><span class="swatch" style="background:#ff7b72"></span>J3</span>
           <span><span class="swatch" style="background:#c297ff"></span>J4</span>
           <span><span class="swatch" style="background:#7ee787"></span>J5</span>
+        </div>
+        <div class="camera-panel">
+          <h2 class="side-title">Camera Hub</h2>
+          <div class="camera-controls">
+            <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
+            <button onclick="refreshCameraHub(true)">Refresh cameras</button>
+            <button onclick="startCameraPreview()">Start live</button>
+            <button onclick="stopCameraPreview()">Stop live</button>
+          </div>
+          <div class="camera-view">
+            <img id="cameraImage" alt="Camera preview">
+            <span id="cameraPlaceholder">No camera selected</span>
+          </div>
+          <div class="camera-meta">
+            <span id="cameraState">Scanning cameras</span>
+            <span id="cameraDetail"></span>
+          </div>
         </div>
       </section>
       <aside>
@@ -1345,7 +1417,154 @@ MODEL_TEST_HTML = """<!doctype html>
       window.open('http://127.0.0.1:7865', '_blank');
     }
 
+    let cameraRunning = false;
+    let cameraTimer = null;
+    let cameraSources = [];
+    let activeCameraSource = '';
+    let resolutionState = { top_view: "640x480", d405: "640x480" };
+
+    function renderCameraSources(sources, activeSource) {
+      const select = document.getElementById('cameraSource');
+      const previous = select.value;
+      cameraSources = Array.isArray(sources) ? sources : [];
+      select.innerHTML = '';
+      if (cameraSources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        select.disabled = true;
+        activeCameraSource = '';
+        return;
+      }
+      select.disabled = false;
+      cameraSources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        select.appendChild(option);
+      });
+      const preferred = activeSource || previous;
+      const exists = cameraSources.some((source) => source.id === preferred);
+      select.value = exists ? preferred : cameraSources[0].id;
+      activeCameraSource = select.value;
+    }
+
+    function selectedCameraSource() {
+      const value = document.getElementById('cameraSource').value;
+      return value || '';
+    }
+
+    async function refreshCameraHub(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderCameraSources(data.sources || [], data.active_source);
+        activeCameraSource = data.active_source || selectedCameraSource();
+        document.getElementById('cameraState').textContent = data.sources.length
+          ? (data.running ? `Live stream active · ${data.active_label}` : `${data.sources.length} camera(s) detected`)
+          : 'No camera detected';
+        document.getElementById('cameraDetail').textContent = data.active_detail || '';
+        if (writeLog) output(data.message);
+        updateCameraView();
+      } catch (err) {
+        output(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    function cameraFrameUrl() {
+      const source = selectedCameraSource();
+      if (!source) return '';
+      return `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}`;
+    }
+
+    function stopCameraElement() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (cameraTimer) {
+        clearInterval(cameraTimer);
+        cameraTimer = null;
+      }
+      img.src = '';
+      img.style.display = 'none';
+      placeholder.style.display = 'block';
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning) return;
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      img.src = frameUrl;
+    }
+
+    function updateCameraView() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (!cameraRunning) {
+        stopCameraElement();
+        placeholder.textContent = selectedCameraSource() ? 'Live stream stopped' : 'No camera selected';
+        return;
+      }
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      if (!cameraTimer) {
+        cameraTimer = setInterval(updateCameraFrame, 150);
+      }
+      img.src = frameUrl;
+    }
+
+    async function handleCameraSourceChange() {
+      activeCameraSource = selectedCameraSource();
+      if (!cameraRunning) return;
+      await startCameraPreview();
+    }
+
+    async function startCameraPreview() {
+      try {
+        const source = selectedCameraSource();
+        if (!source) {
+          output('No camera selected');
+          return;
+        }
+        let res = "640x480";
+        if (source.includes('d405')) res = resolutionState.d405;
+        else res = resolutionState.top_view;
+        const [w, h] = res.split('x').map(Number);
+        const data = await api('/api/video/start', {source, width: w, height: h});
+        output(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        output(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function stopCameraPreview() {
+      try {
+        const data = await api('/api/video/stop', {});
+        output(data.message);
+        stopCameraElement();
+        await refreshCameraHub(false);
+      } catch (err) {
+        output(`ERROR camera: ${err.message}`);
+      }
+    }
+
     refreshStatus();
+    refreshCameraHub(false);
     drawTrajectory([]);
     setInterval(refreshStatus, 2000);
   </script>
@@ -1748,6 +1967,42 @@ TEACH_HTML = """<!doctype html>
       color: var(--text);
       font-weight: 650;
     }
+    .act-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .act-output {
+      min-height: 220px;
+      max-height: 440px;
+    }
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0 14px;
+    }
+    .quality-tile {
+      min-height: 72px;
+      padding: 12px;
+      background: #101417;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .quality-value {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+      font-weight: 720;
+    }
+    .quality-label {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
     .preview-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1892,6 +2147,7 @@ TEACH_HTML = """<!doctype html>
       .frame-controls { grid-template-columns: 1fr; }
       .video-controls { grid-template-columns: 1fr; }
       .playback-state { text-align: left; }
+      .act-grid, .quality-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1899,8 +2155,8 @@ TEACH_HTML = """<!doctype html>
   <main>
     <header>
       <div>
-        <h1>Teach</h1>
-        <div class="sub">Collecte simple de demonstrations WidowX avec top cam + D405 RGB/depth</div>
+        <h1>Teach ACT</h1>
+        <div class="sub">Collecte WidowX compatible LeRobot ACT: observations camera + state, actions futures, labels de tache</div>
       </div>
       <a href="/">Back to control</a>
     </header>
@@ -2098,6 +2354,74 @@ TEACH_HTML = """<!doctype html>
                 <button class="danger" onclick="clearRecordings()">Delete all</button>
               </div>
             </div>
+
+            <div class="step-card review">
+              <div class="step-kicker">Step 3</div>
+              <h3>LeRobot Dataset export</h3>
+              <div class="card-subtitle">Convertit les captures WidowX en LeRobotDataset: parquet + meta + images ou videos. L'entrainement ACT reste prevu sur DGX.</div>
+              <div class="act-grid">
+                <div class="field">
+                  <label>HF dataset repo id</label>
+                  <input id="actRepoId" type="text" value="matteo/widowx-push-cube-local" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Dataset folder name</label>
+                  <input id="actDatasetName" type="text" value="widowx_push_cube_full" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Cameras for ACT</label>
+                  <select id="actCameras" onchange="refreshActPlan(false)">
+                    <option value="top_view,wrist_rgb" selected>top_view + wrist_rgb</option>
+                    <option value="top_view">top_view only</option>
+                    <option value="wrist_rgb">wrist_rgb only</option>
+                    <option value="top_view,wrist_rgb,wrist_depth">top_view + wrist_rgb + wrist_depth</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>LeRobot output root</label>
+                  <input id="actOutputRoot" type="text" value="/tmp/lerobot_datasets/widowx_push_cube_full" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Media storage</label>
+                  <select id="actUseVideos" onchange="refreshActPlan(false)">
+                    <option value="false" selected>parquet + meta + images</option>
+                    <option value="true">parquet + meta + videos</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Max episodes</label>
+                  <input id="actMaxEpisodes" type="number" min="1" step="1" placeholder="all" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Training steps</label>
+                  <input id="actSteps" type="number" min="200" step="100" value="10000" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Batch size</label>
+                  <input id="actBatchSize" type="number" min="1" step="1" value="8" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label><input id="actOverwrite" type="checkbox" checked onchange="refreshActPlan(false)"> Overwrite output folder</label>
+                </div>
+              </div>
+              <div class="quality-grid">
+                <div class="quality-tile"><span class="quality-value" id="actEpisodes">0</span><span class="quality-label">dataset episodes</span></div>
+                <div class="quality-tile"><span class="quality-value" id="actFrames">0</span><span class="quality-label">camera frames</span></div>
+                <div class="quality-tile"><span class="quality-value" id="actTasks">0</span><span class="quality-label">task labels</span></div>
+                <div class="quality-tile"><span class="quality-value" id="actReady">-</span><span class="quality-label">ACT readiness</span></div>
+              </div>
+              <div class="status-pill" id="lerobotExportPill">
+                <span class="status-led"></span>
+                <span id="lerobotExportText">Export idle</span>
+              </div>
+              <div class="action-row">
+                <button onclick="refreshActPlan(true)">Refresh ACT plan</button>
+                <button class="primary" onclick="startLeRobotExport()">Export LeRobotDataset</button>
+                <button onclick="openMonitor()">Open training monitor</button>
+              </div>
+              <pre class="act-output" id="actPlanOutput">ACT plan not loaded yet.</pre>
+              <pre class="act-output" id="lerobotExportOutput">LeRobot export not started yet.</pre>
+            </div>
           </div>
 
           <div class="review-shell">
@@ -2255,6 +2579,82 @@ TEACH_HTML = """<!doctype html>
       return data;
     }
 
+    function actPayload() {
+      const maxEpisodesRaw = document.getElementById('actMaxEpisodes')?.value;
+      const maxEpisodes = maxEpisodesRaw ? Number(maxEpisodesRaw) : null;
+      return {
+        repo_id: document.getElementById('actRepoId')?.value.trim() || 'matteo/widowx-push-cube-local',
+        dataset_name: document.getElementById('actDatasetName')?.value.trim() || 'widowx_push_cube_full',
+        cameras: document.getElementById('actCameras')?.value || 'top_view,wrist_rgb',
+        output_root: document.getElementById('actOutputRoot')?.value.trim() || '/tmp/lerobot_datasets/widowx_push_cube_full',
+        use_videos: document.getElementById('actUseVideos')?.value === 'true',
+        overwrite: Boolean(document.getElementById('actOverwrite')?.checked),
+        max_episodes: Number.isFinite(maxEpisodes) ? maxEpisodes : null,
+        steps: Number(document.getElementById('actSteps')?.value || 10000),
+        batch_size: Number(document.getElementById('actBatchSize')?.value || 8)
+      };
+    }
+
+    function renderActPlan(data) {
+      document.getElementById('actEpisodes').textContent = data.dataset.episodes;
+      document.getElementById('actFrames').textContent = data.dataset.frames;
+      document.getElementById('actTasks').textContent = data.dataset.tasks;
+      document.getElementById('actReady').textContent = data.dataset.ready ? 'yes' : 'check';
+      const warnings = data.dataset.warnings.length
+        ? `Warnings:\\n${data.dataset.warnings.map((item) => `- ${item}`).join('\\n')}\\n\\n`
+        : '';
+      document.getElementById('actPlanOutput').textContent =
+        `${warnings}LeRobotDataset output:\\n${data.dataset.output_root}\\nFormat: ${data.dataset.media_storage}\\n\\nConvert local captures to LeRobotDataset:\\n${data.commands.convert}\\n\\nTrain ACT on DGX:\\n${data.commands.train}\\n\\nDGX SLURM shortcuts:\\n${data.commands.slurm}`;
+    }
+
+    async function refreshActPlan(writeLog = false) {
+      try {
+        const data = await api('/api/act_dataset/plan', actPayload());
+        renderActPlan(data);
+        if (writeLog) log('ACT LeRobot plan refreshed');
+      } catch (err) {
+        const out = document.getElementById('actPlanOutput');
+        if (out) out.textContent = `ERROR ACT plan: ${err.message}`;
+        if (writeLog) log(`ERROR ACT plan: ${err.message}`);
+      }
+    }
+
+    function renderLeRobotExportStatus(data) {
+      const pill = document.getElementById('lerobotExportPill');
+      const text = document.getElementById('lerobotExportText');
+      const out = document.getElementById('lerobotExportOutput');
+      if (!pill || !text || !out) return;
+      pill.classList.toggle('live', Boolean(data.running));
+      pill.classList.toggle('ok', !data.running && data.returncode === 0);
+      pill.classList.toggle('warn', !data.running && data.returncode !== 0);
+      text.textContent = data.running
+        ? `Export running PID ${data.pid}`
+        : (data.returncode === 0 ? 'Export complete' : 'Export idle');
+      const command = data.command ? `Command:\\n${data.command}\\n\\n` : '';
+      out.textContent = `${data.message || ''}\\n${data.output_root ? `Output: ${data.output_root}\\n` : ''}${command}${data.output || ''}`.trim() || 'LeRobot export not started yet.';
+    }
+
+    async function refreshLeRobotExport(writeLog = false) {
+      try {
+        const data = await api('/api/lerobot_export/status');
+        renderLeRobotExportStatus(data);
+        if (writeLog) log(data.message);
+      } catch (err) {
+        const out = document.getElementById('lerobotExportOutput');
+        if (out) out.textContent = `ERROR LeRobot export: ${err.message}`;
+      }
+    }
+
+    async function startLeRobotExport() {
+      try {
+        const data = await api('/api/lerobot_export/start', actPayload());
+        renderLeRobotExportStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR LeRobot export: ${err.message}`);
+      }
+    }
+
     async function refreshAll(writeLog = false) {
       try {
         const arm = await api('/api/status');
@@ -2308,6 +2708,8 @@ TEACH_HTML = """<!doctype html>
         document.getElementById('holdButton').textContent = arm.hold ? 'Hold off' : 'Hold';
         updateCaptureSummary();
         updateCameraLoop();
+        refreshActPlan(false);
+        refreshLeRobotExport(false);
         if (writeLog) log('Status updated');
       } catch (err) {
         log(`ERROR: ${err.message}`);
@@ -2805,6 +3207,13 @@ TEACH_HTML = """<!doctype html>
             cameraCaptureState.wrist_depth ? {source: 'd405:depth', role: 'wrist_depth', crop: datasetCropConfig('wrist_depth')} : null
           ].filter(Boolean),
           task_name: document.getElementById('datasetTaskName').value.trim(),
+          dataset_profile: 'lerobot_act',
+          action_offset: 1,
+          lerobot_features: {
+            state: 'observation.state',
+            images: ['observation.images.top_view', 'observation.images.wrist_rgb'],
+            action: 'nearest future motor state for ACT action chunking'
+          },
           armed: document.getElementById('armed').checked
         });
         log(data.message);
@@ -3161,8 +3570,14 @@ TEACH_HTML = """<!doctype html>
       }
     }
 
+    function openMonitor() {
+      window.open('http://127.0.0.1:7865', '_blank');
+    }
+
     refreshAll();
     loadRecordings();
+    refreshActPlan(false);
+    refreshLeRobotExport(false);
     setInterval(() => refreshAll(false), 1500);
   </script>
 </body>
@@ -3792,6 +4207,9 @@ class TeachRecorder:
                 "capture_type": str(payload.get("capture_type", "manual")),
                 "source_recording": payload.get("source_recording"),
                 "task_name": str(payload.get("task_name", "")).strip() or None,
+                "dataset_profile": str(payload.get("dataset_profile", "")).strip() or None,
+                "action_offset": int(payload.get("action_offset", 1)),
+                "lerobot_features": payload.get("lerobot_features"),
                 "robot_ip": self.arm.args.ip,
                 "variant": self.arm.args.variant,
                 "mode": "high_smooth" if high_smooth else "standard",
@@ -5064,6 +5482,9 @@ class DatasetCaptureRunner:
             "capture_type": "dataset_replay",
             "source_recording": raw_path,
             "task_name": payload.get("task_name"),
+            "dataset_profile": payload.get("dataset_profile"),
+            "action_offset": payload.get("action_offset", 1),
+            "lerobot_features": payload.get("lerobot_features"),
         }
         replay_payload = {
             "path": raw_path,
@@ -5302,6 +5723,14 @@ class ModelTestRunner:
             "--max-runtime",
             str(max(10.0, steps * period + 10.0)),
         ]
+        
+        cameras = RequestHandler.camera_controller.usb_status().get("cameras", [])
+        if cameras:
+            command.extend([
+                "--top-camera-source", 
+                f"/dev/video{cameras[0]['index']}"
+            ])
+
         if real:
             command.extend(["--real", "--armed"])
 
@@ -5365,6 +5794,272 @@ class ModelTestRunner:
         return f"Model test emergency stop requested (PID {pid})."
 
 
+class ActDatasetPlanner:
+    def __init__(self, project_root: Path, recordings: RecordingLibrary) -> None:
+        self.project_root = project_root
+        self.recordings = recordings
+
+    @staticmethod
+    def _safe_name(raw_name: Any, default: str) -> str:
+        name = str(raw_name or default).strip()
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        cleaned = "".join(ch if ch in allowed else "_" for ch in name)
+        return cleaned or default
+
+    @staticmethod
+    def _positive_int(payload: dict[str, Any], name: str, default: int, low: int, high: int) -> int:
+        value = int(payload.get(name) or default)
+        if not low <= value <= high:
+            raise RuntimeError(f"{name} must be between {low} and {high}.")
+        return value
+
+    @staticmethod
+    def _camera_list(raw_cameras: Any) -> list[str]:
+        cameras = [item.strip() for item in str(raw_cameras or "top_view,wrist_rgb").split(",") if item.strip()]
+        allowed = {"top_view", "wrist_rgb", "wrist_depth"}
+        unknown = [camera for camera in cameras if camera not in allowed]
+        if unknown:
+            raise RuntimeError(f"Unknown ACT camera(s): {', '.join(unknown)}.")
+        if not cameras:
+            raise RuntimeError("Select at least one ACT camera.")
+        return cameras
+
+    @staticmethod
+    def _quote_args(args: list[str]) -> str:
+        return " ".join(shlex.quote(str(arg)) for arg in args)
+
+    @staticmethod
+    def _is_relative_to(path: Path, base: Path) -> bool:
+        try:
+            path.relative_to(base)
+        except ValueError:
+            return False
+        return True
+
+    def _default_output_root(self, dataset_name: str) -> Path:
+        return Path("/tmp") / "lerobot_datasets" / dataset_name
+
+    def _safe_output_root(self, raw_root: Any, dataset_name: str) -> Path:
+        raw = str(raw_root or "").strip()
+        root = Path(raw).expanduser() if raw else self._default_output_root(dataset_name)
+        if not root.is_absolute():
+            root = self.project_root / root
+        resolved = root.resolve()
+        project_root = self.project_root.resolve()
+        tmp_root = Path("/tmp").resolve()
+        forbidden = {Path("/").resolve(), tmp_root, project_root, project_root.parent.resolve()}
+        if resolved in forbidden:
+            raise RuntimeError(f"Refusing unsafe LeRobot output root: {resolved}")
+        if not (self._is_relative_to(resolved, tmp_root) or self._is_relative_to(resolved, project_root)):
+            raise RuntimeError("LeRobot output root must be under /tmp or this project folder.")
+        return resolved
+
+    def plan(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        dataset_name = self._safe_name(payload.get("dataset_name"), "widowx_push_cube_full")
+        repo_id = str(payload.get("repo_id") or "matteo/widowx-push-cube-local").strip()
+        if "/" not in repo_id:
+            raise RuntimeError("repo_id should look like hf_user/dataset_name.")
+        cameras = self._camera_list(payload.get("cameras"))
+        steps = self._positive_int(payload, "steps", 10000, 200, 500000)
+        batch_size = self._positive_int(payload, "batch_size", 8, 1, 256)
+        max_episodes = payload.get("max_episodes")
+        max_episode_count = int(max_episodes) if max_episodes not in {None, "", 0} else None
+        if max_episode_count is not None and max_episode_count < 1:
+            raise RuntimeError("max_episodes must be empty or greater than 0.")
+        output_root = self._safe_output_root(payload.get("output_root"), dataset_name)
+        use_videos = bool(payload.get("use_videos"))
+        overwrite = bool(payload.get("overwrite", True))
+
+        recordings = self.recordings.list()["recordings"]
+        dataset_recordings = [
+            item for item in recordings if item.get("capture_type") == "dataset_replay"
+        ]
+        selected_recordings = dataset_recordings[:max_episode_count] if max_episode_count else dataset_recordings
+
+        total_frames = sum(int(item.get("samples") or 0) for item in selected_recordings)
+        tasks = sorted({str(item.get("task_name")) for item in selected_recordings if item.get("task_name")})
+        available_cameras: set[str] = set()
+        missing_camera_sessions = 0
+        for item in selected_recordings:
+            roles = {
+                str(entry.get("role"))
+                for entry in item.get("capture_sources", [])
+                if isinstance(entry, dict) and entry.get("role")
+            }
+            available_cameras.update(roles)
+            if any(camera not in roles for camera in cameras):
+                missing_camera_sessions += 1
+
+        warnings = []
+        if len(selected_recordings) < 50:
+            warnings.append("ACT is data efficient, but the LeRobot docs recommend starting near 50 demonstrations when possible.")
+        if total_frames < 500:
+            warnings.append("Very few camera frames detected; record more replay+cameras episodes before a full train.")
+        if not tasks:
+            warnings.append("No task labels found; set a stable task label before dataset capture.")
+        if missing_camera_sessions:
+            warnings.append(f"{missing_camera_sessions} selected episode(s) do not contain all requested ACT cameras.")
+
+        dataset_root = output_root
+        output_dir = self.project_root / "outputs" / "train" / f"act_{dataset_name}"
+        job_name = f"act_{dataset_name}"
+        lerobot_python = self.project_root / "Lerobot" / ".venv-lerobot" / "bin" / "python"
+
+        convert_command = [
+            str(lerobot_python),
+            "scripts/convert_widowx_to_lerobot.py",
+            "--source-root",
+            "widowx_ai/recordings",
+            "--output-root",
+            str(dataset_root),
+            "--repo-id",
+            repo_id,
+            "--robot-type",
+            "widowx_ai",
+            "--fps",
+            "30",
+            "--cameras",
+            ",".join(cameras),
+            "--action-offset",
+            "1",
+            "--use-videos" if use_videos else "--no-use-videos",
+        ]
+        if overwrite:
+            convert_command.append("--overwrite")
+        if max_episode_count:
+            convert_command.extend(["--max-episodes", str(max_episode_count)])
+
+        train_command = [
+            "lerobot-train",
+            f"--dataset.repo_id={repo_id}",
+            f"--dataset.root={dataset_root}",
+            "--policy.type=act",
+            f"--output_dir={output_dir}",
+            f"--job_name={job_name}",
+            "--policy.device=cuda",
+            "--wandb.enable=false",
+            "--policy.push_to_hub=false",
+            f"--steps={steps}",
+            f"--batch_size={batch_size}",
+            "--save_freq=1000",
+        ]
+
+        slurm_command = "sbatch slurm/convert_widowx_lerobot_full.slurm && sbatch slurm/lerobot_act_train_full.slurm"
+        return {
+            "ok": True,
+            "dataset": {
+                "episodes": len(selected_recordings),
+                "available_episodes": len(dataset_recordings),
+                "frames": total_frames,
+                "tasks": len(tasks),
+                "task_names": tasks,
+                "available_cameras": sorted(available_cameras),
+                "requested_cameras": cameras,
+                "ready": not warnings,
+                "warnings": warnings,
+                "output_root": str(dataset_root),
+                "media_storage": "videos" if use_videos else "images",
+            },
+            "commands": {
+                "convert": self._quote_args(convert_command),
+                "train": self._quote_args(train_command),
+                "slurm": slurm_command,
+            },
+            "notes": [
+                "ACT takes RGB images and robot state as observations, then predicts future action chunks.",
+                "The converter uses observation.state, observation.images.<camera>, and action features for LeRobot.",
+            ],
+        }
+
+
+class LeRobotExportRunner:
+    def __init__(self, project_root: Path, planner: ActDatasetPlanner) -> None:
+        self.project_root = project_root
+        self.planner = planner
+        self.lock = threading.Lock()
+        self.process: subprocess.Popen[str] | None = None
+        self.output: deque[str] = deque(maxlen=400)
+        self.command: list[str] = []
+        self.output_root: str | None = None
+        self.returncode: int | None = None
+        self.last_message = "LeRobot export ready."
+
+    def _is_running_unlocked(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            if self.process is not None and self.process.poll() is not None:
+                self.returncode = self.process.returncode
+            return self._status_unlocked(self.last_message)
+
+    def _status_unlocked(self, message: str) -> dict[str, Any]:
+        running = self._is_running_unlocked()
+        return {
+            "ok": True,
+            "running": running,
+            "pid": self.process.pid if running and self.process is not None else None,
+            "returncode": self.returncode,
+            "command": ActDatasetPlanner._quote_args(self.command) if self.command else "",
+            "output_root": self.output_root,
+            "output": "\n".join(self.output),
+            "message": message,
+        }
+
+    def start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        plan = self.planner.plan(payload)
+        if int(plan["dataset"]["episodes"]) < 1:
+            raise RuntimeError("No dataset capture episodes found. Run 'Replay movement + record camera' first.")
+        command = shlex.split(plan["commands"]["convert"])
+        python_path = Path(command[0])
+        converter_path = self.project_root / "scripts" / "convert_widowx_to_lerobot.py"
+        if not python_path.exists():
+            raise RuntimeError(f"LeRobot Python environment not found: {python_path}")
+        if not converter_path.exists():
+            raise RuntimeError(f"LeRobot converter not found: {converter_path}")
+        env = os.environ.copy()
+        env.setdefault("HF_HOME", "/tmp/lerobot_hf_cache")
+        env.setdefault("HF_DATASETS_CACHE", "/tmp/lerobot_hf_cache/datasets")
+        env["PYTHONUNBUFFERED"] = "1"
+        with self.lock:
+            if self._is_running_unlocked():
+                return self._status_unlocked("LeRobot export is already running.")
+            self.command = command
+            self.output_root = str(plan["dataset"]["output_root"])
+            self.returncode = None
+            self.output.clear()
+            self.process = subprocess.Popen(
+                command,
+                cwd=str(self.project_root),
+                env=env,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            process = self.process
+            self.last_message = f"LeRobot export started (PID {process.pid})."
+            threading.Thread(target=self._watch, args=(process,), daemon=True).start()
+            return self._status_unlocked(self.last_message)
+
+    def _watch(self, process: subprocess.Popen[str]) -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            with self.lock:
+                self.output.append(line.rstrip())
+        returncode = process.wait()
+        with self.lock:
+            self.returncode = returncode
+            if self.process is process:
+                self.last_message = (
+                    f"LeRobot export complete: {self.output_root}"
+                    if returncode == 0
+                    else f"LeRobot export failed with code {returncode}."
+                )
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     controller: ArmController
     camera_controller: CameraController
@@ -5374,6 +6069,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     dataset_capture_runner: DatasetCaptureRunner
     trossen_ui_runner: TrossenDataCollectionUIRunner
     model_test_runner: ModelTestRunner
+    act_dataset_planner: ActDatasetPlanner
+    lerobot_export_runner: LeRobotExportRunner
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}")
@@ -5459,6 +6156,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/recordings":
             self.send_json(self.recording_library.list())
+            return
+        if parsed.path == "/api/act_dataset/plan":
+            self.send_json(self.act_dataset_planner.plan())
+            return
+        if parsed.path == "/api/lerobot_export/status":
+            self.send_json(self.lerobot_export_runner.status())
             return
         if parsed.path == "/api/camera/frame":
             try:
@@ -5560,6 +6263,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "/api/trossen_ui/start": self.trossen_ui_runner.start,
                 "/api/trossen_ui/stop": self.trossen_ui_runner.stop,
                 "/api/model_test/run": lambda: self.model_test_runner.run(payload),
+                "/api/act_dataset/plan": lambda: self.act_dataset_planner.plan(payload),
+                "/api/lerobot_export/start": lambda: self.lerobot_export_runner.start(payload),
                 "/api/recording/load": lambda: self.recording_library.load(payload),
                 "/api/recording/delete": lambda: self.recording_library.delete(payload),
                 "/api/recordings/clear": self.recording_library.clear,
@@ -5627,6 +6332,8 @@ def main() -> int:
     dataset_capture_runner = DatasetCaptureRunner(teach_recorder, replay_runner)
     trossen_ui_runner = TrossenDataCollectionUIRunner(project_root)
     model_test_runner = ModelTestRunner(project_root, controller)
+    act_dataset_planner = ActDatasetPlanner(project_root, recording_library)
+    lerobot_export_runner = LeRobotExportRunner(project_root, act_dataset_planner)
     RequestHandler.controller = controller
     RequestHandler.camera_controller = camera_controller
     RequestHandler.teach_recorder = teach_recorder
@@ -5635,6 +6342,8 @@ def main() -> int:
     RequestHandler.dataset_capture_runner = dataset_capture_runner
     RequestHandler.trossen_ui_runner = trossen_ui_runner
     RequestHandler.model_test_runner = model_test_runner
+    RequestHandler.act_dataset_planner = act_dataset_planner
+    RequestHandler.lerobot_export_runner = lerobot_export_runner
     server = ThreadingHTTPServer((args.host, args.port), RequestHandler)
     mode = "REAL ARM ENABLED" if args.real else "dry-run"
     print(f"WidowX AI interface running at http://{args.host}:{args.port} ({mode})")

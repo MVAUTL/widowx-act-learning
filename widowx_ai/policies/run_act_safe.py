@@ -27,6 +27,11 @@ try:
 except ImportError:
     rs = None
 
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
 from widowx_ai.training.train_act import STATE_DIM, TinyActPolicy
 
 
@@ -91,7 +96,18 @@ def _configure_driver(args: argparse.Namespace) -> trossen_arm.TrossenArmDriver:
     return driver
 
 
-def _load_policy(checkpoint_path: Path) -> tuple[TinyActPolicy, dict[str, Any], dict[str, Any]]:
+def _load_policy(checkpoint_path: Path) -> tuple[Any, dict[str, Any], dict[str, Any]]:
+    if checkpoint_path.is_dir():
+        if (checkpoint_path / "pretrained_model").is_dir():
+            checkpoint_path = checkpoint_path / "pretrained_model"
+        try:
+            from lerobot.common.policies.act.modeling_act import ACTPolicy
+        except ImportError:
+            from lerobot.policies.act.modeling_act import ACTPolicy
+        model = ACTPolicy.from_pretrained(checkpoint_path, local_files_only=True)
+        model.eval()
+        return model, {}, {}
+
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = checkpoint["config"]
     normalization = checkpoint["normalization"]
@@ -125,8 +141,16 @@ def _latest_dataset_sample(root: Path, view: str) -> tuple[Path, dict[str, Any]]
     raise RuntimeError(f"No sample image found for view '{view}'.")
 
 
+def _crop_center_square(img: Image.Image) -> Image.Image:
+    w, h = img.size
+    s = min(w, h)
+    left = (w - s) // 2
+    top = (h - s) // 2
+    return img.crop((left, top, left + s, top + s))
+
 def _load_image_tensor(image_path: Path, image_size: int) -> torch.Tensor:
     image = Image.open(image_path).convert("RGB")
+    image = _crop_center_square(image)
     image = image.resize((image_size, image_size), Image.Resampling.BILINEAR)
     array = np.asarray(image, dtype=np.float32) / 255.0
     array = np.transpose(array, (2, 0, 1))
@@ -162,13 +186,50 @@ class RealSenseColor:
         if not frame:
             raise RuntimeError("No RealSense color frame received.")
         image = Image.fromarray(np.asanyarray(frame.get_data())).convert("RGB")
-        image = image.resize((image_size, image_size), Image.Resampling.BILINEAR)
+        image = _crop_center_square(image)
+        image = image.resize(image_size if isinstance(image_size, tuple) else (image_size, image_size), Image.Resampling.BILINEAR)
+        array = np.asarray(image, dtype=np.float32) / 255.0
+        array = np.transpose(array, (2, 0, 1))
+        return torch.from_numpy(array).unsqueeze(0)
+
+
+class USBCamera:
+    def __init__(self, source: str, width: int, height: int) -> None:
+        if cv2 is None:
+            raise RuntimeError("cv2 is not installed in this Python environment.")
+        self.cap = cv2.VideoCapture(source)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.started = False
+
+    def __enter__(self) -> "USBCamera":
+        self.started = True
+        for _ in range(15):
+            self.cap.read()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        if self.started:
+            self.cap.release()
+            self.started = False
+
+    def image_tensor(self, image_size: tuple[int, int] | int) -> torch.Tensor:
+        ret, frame = self.cap.read()
+        if not ret:
+            raise RuntimeError("No USB camera frame received.")
+        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        image = _crop_center_square(image)
+        image = image.resize(image_size if isinstance(image_size, tuple) else (image_size, image_size), Image.Resampling.BILINEAR)
         array = np.asarray(image, dtype=np.float32) / 255.0
         array = np.transpose(array, (2, 0, 1))
         return torch.from_numpy(array).unsqueeze(0)
 
 
 def _training_envelope(config: dict[str, Any], checkpoint_path: Path, margin: float) -> tuple[np.ndarray, np.ndarray]:
+    if "root" not in config:
+        low = np.asarray([float(limit[0]) for limit in JOINT_LIMITS] + [0.0], dtype=np.float32)
+        high = np.asarray([float(limit[1]) for limit in JOINT_LIMITS] + [0.15], dtype=np.float32)
+        return low, high
     root = Path(config["root"])
     if not root.is_absolute():
         root = checkpoint_path.parent / root
@@ -229,11 +290,25 @@ def _validate_target(
 
 def _predict(
     *,
-    model: TinyActPolicy,
+    model: Any,
     image: torch.Tensor,
+    top_image: torch.Tensor | None,
     state: np.ndarray,
     normalization: dict[str, Any],
 ) -> np.ndarray:
+    if hasattr(model, "select_action"):
+        device = next(model.parameters()).device
+        batch = {
+            "observation.images.wrist_rgb": image.to(device),
+            "observation.state": torch.from_numpy(state).unsqueeze(0).to(device)
+        }
+        if top_image is not None:
+            batch["observation.images.top_view"] = top_image.to(device)
+            
+        with torch.inference_mode():
+            pred = model.select_action(batch)[0]
+        return pred.detach().cpu().numpy()
+
     state_mean = np.asarray(normalization["state_mean"], dtype=np.float32)
     state_std = np.asarray(normalization["state_std"], dtype=np.float32)
     action_mean = np.asarray(normalization["action_mean"], dtype=np.float32)
@@ -308,7 +383,11 @@ def _command_robot(
 def _print_train_info(checkpoint_path: Path, config: dict[str, Any]) -> None:
     run_dir = checkpoint_path.parent
     history_path = run_dir / "history.json"
-    history = _read_json(history_path) if history_path.exists() else []
+    if not history_path.exists():
+        print(f"Loaded LeRobot policy from: {checkpoint_path}")
+        return
+        
+    history = _read_json(history_path)
     best = min(history, key=lambda row: row["val_l1"] if row.get("val_l1") is not None else row["train_l1"])
     print("Training run")
     print(f"  run_dir: {run_dir}")
@@ -346,6 +425,8 @@ def main() -> int:
     parser.add_argument("--camera-width", type=int, default=640)
     parser.add_argument("--camera-height", type=int, default=480)
     parser.add_argument("--camera-fps", type=int, default=30)
+    parser.add_argument("--top-camera-source", default=None)
+    parser.add_argument("--top-camera-resolution", default="640x480")
     args = parser.parse_args()
 
     checkpoint_path = Path(args.checkpoint).expanduser().resolve()
@@ -353,7 +434,16 @@ def main() -> int:
     _print_train_info(checkpoint_path, config)
     low, high = _training_envelope(config, checkpoint_path, args.envelope_margin)
     view = str(config.get("view", "wrist_rgb"))
-    image_size = int(config.get("image_size", 96))
+    
+    is_lerobot = hasattr(model, "select_action")
+    if is_lerobot:
+        try:
+            shape = model.config.input_features["observation.images.wrist_rgb"].shape
+            image_size = (shape[1], shape[2])
+        except (AttributeError, KeyError):
+            image_size = (480, 480)
+    else:
+        image_size = int(config.get("image_size", 96))
 
     print("Safety gates")
     print(f"  real motion: {args.real and args.armed}")
@@ -368,6 +458,7 @@ def main() -> int:
 
     driver: trossen_arm.TrossenArmDriver | None = None
     camera: RealSenseColor | None = None
+    top_camera: USBCamera | None = None
     try:
         if args.real:
             driver = _configure_driver(args)
@@ -378,14 +469,27 @@ def main() -> int:
                 fps=args.camera_fps,
             )
             camera_ctx = camera.__enter__()
+            top_camera_ctx = None
+            if is_lerobot and args.top_camera_source:
+                w, h = map(int, args.top_camera_resolution.split("x"))
+                top_camera = USBCamera(args.top_camera_source, w, h)
+                top_camera_ctx = top_camera.__enter__()
             current = _read_robot_state(driver)
         else:
-            root = Path(config["root"])
-            session, sample = _latest_dataset_sample(root, view)
-            image_path = session / str((sample.get("images") or {})[view])
-            current = _state_from_row(sample)
-            camera_ctx = None
-            print(f"Dry-run sample: {image_path}")
+            if is_lerobot:
+                current = np.asarray([0.0]*7, dtype=np.float32)
+                camera_ctx = None
+                top_camera_ctx = None
+                image_path = Path("dummy")
+                print("Dry-run: LeRobot checkpoint detected, using dummy inputs.")
+            else:
+                root = Path(config["root"])
+                session, sample = _latest_dataset_sample(root, view)
+                image_path = session / str((sample.get("images") or {})[view])
+                current = _state_from_row(sample)
+                camera_ctx = None
+                top_camera_ctx = None
+                print(f"Dry-run sample: {image_path}")
 
         deadline = time.monotonic() + args.max_runtime
         for step in range(1, args.steps + 1):
@@ -398,9 +502,16 @@ def main() -> int:
                 assert camera_ctx is not None
                 current = _read_robot_state(driver)
                 image = camera_ctx.image_tensor(image_size)
+                top_image = top_camera_ctx.image_tensor(image_size) if top_camera_ctx else None
             else:
-                image = _load_image_tensor(image_path, image_size)
-            raw_target = _predict(model=model, image=image, state=current, normalization=normalization)
+                if is_lerobot:
+                    c, h, w = (3, image_size[0], image_size[1]) if isinstance(image_size, tuple) else (3, image_size, image_size)
+                    image = torch.zeros((1, c, h, w), dtype=torch.float32)
+                    top_image = torch.zeros((1, c, h, w), dtype=torch.float32)
+                else:
+                    image = _load_image_tensor(image_path, image_size)
+                    top_image = None
+            raw_target = _predict(model=model, image=image, top_image=top_image, state=current, normalization=normalization)
             target = _validate_target(
                 current=current,
                 target=raw_target,
@@ -429,6 +540,8 @@ def main() -> int:
             current = target
 
     finally:
+        if top_camera is not None:
+            top_camera.__exit__(None, None, None)
         if camera is not None:
             camera.__exit__(None, None, None)
         if driver is not None:

@@ -6,6 +6,7 @@ Full documentation:
 
 - English: [docs/README.en.md](docs/README.en.md)
 - French: [docs/README.fr.md](docs/README.fr.md)
+- HAMSTER/VILA on DGX Spark: [docs/hamster_dgx_spark.fr.md](docs/hamster_dgx_spark.fr.md)
 - Research links and papers: [docs/research/README.md](docs/research/README.md)
 
 ## Project Layout
