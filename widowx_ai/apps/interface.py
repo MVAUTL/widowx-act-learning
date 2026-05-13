@@ -10,7 +10,6 @@ import argparse
 from collections import deque
 from datetime import datetime
 import json
-import math
 import os
 import shlex
 import shutil
@@ -29,45 +28,33 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import trossen_arm
 
+from .config import (
+    DEFAULT_GRAVITY_PAYLOAD,
+    DEFAULT_MAX_SPEED,
+    DEMO,
+    END_EFFECTORS,
+    GRAVITY_PAYLOADS,
+    HOME,
+    JOINT_LIMITS,
+    JOINT_LIMIT_TOLERANCE,
+    MAX_CAMERA_WRIST_EFFORT,
+    MAX_MAX_SPEED,
+    MIN_CAMERA_WRIST_EFFORT,
+    MIN_MAX_SPEED,
+    PACKAGE_ROOT,
+    PROJECT_ROOT,
+    REPLAY_GRIPPER_MAX_SPEED,
+    REST,
+    START_POSITION_MIN_TIME,
+)
+from .hamster import HamsterService
+
 try:
     import cv2
     import pyrealsense2 as rs
 except ImportError:
     cv2 = None
     rs = None
-
-
-HOME = np.array([0.0, math.pi / 2, math.pi / 2, 0.0, 0.0, 0.0], dtype=float)
-DEMO = HOME + np.array([0.0, 0.0, 0.0, 0.15, -0.12, 0.0], dtype=float)
-REST = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
-DEFAULT_MAX_SPEED = 0.3
-MIN_MAX_SPEED = 0.05
-MAX_MAX_SPEED = 1.5
-REPLAY_GRIPPER_MAX_SPEED = 0.015
-START_POSITION_MIN_TIME = 2.5
-JOINT_LIMIT_TOLERANCE = 5e-3
-DEFAULT_GRAVITY_PAYLOAD = "d405_follower"
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = PACKAGE_ROOT.parent
-MIN_CAMERA_WRIST_EFFORT = -0.6
-MAX_CAMERA_WRIST_EFFORT = 0.6
-JOINT_LIMITS = [
-    (-math.pi, math.pi),
-    (0.0, math.pi),
-    (0.0, 2.3562),
-    (-math.pi / 2, math.pi / 2),
-    (-math.pi / 2, math.pi / 2),
-    (-math.pi, math.pi),
-]
-END_EFFECTORS = {
-    "base": trossen_arm.StandardEndEffector.wxai_v0_base,
-    "leader": trossen_arm.StandardEndEffector.wxai_v0_leader,
-    "follower": trossen_arm.StandardEndEffector.wxai_v0_follower,
-}
-GRAVITY_PAYLOADS = {
-    "variant": None,
-    "d405_follower": trossen_arm.StandardEndEffector.wxai_v0_follower,
-}
 
 
 INDEX_HTML = """<!doctype html>
@@ -330,6 +317,18 @@ INDEX_HTML = """<!doctype html>
       object-fit: contain;
       display: none;
     }
+    .fps-counter {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.58);
+      color: #f2f6f9;
+      padding: 3px 6px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
     .camera-meta {
       display: flex;
       justify-content: space-between;
@@ -344,12 +343,36 @@ INDEX_HTML = """<!doctype html>
       font-size: 13px;
       line-height: 1.4;
     }
+    .hamster-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: start;
+    }
+    .hamster-panel input {
+      height: 40px;
+    }
+    .hamster-output {
+      min-height: 76px;
+      max-height: 180px;
+      margin-top: 10px;
+    }
+    .hamster-result-image {
+      width: 100%;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0b0d0f;
+      display: none;
+    }
     @media (max-width: 880px) {
       header { align-items: stretch; flex-direction: column; }
       .layout { grid-template-columns: 1fr; }
       .toolbar { grid-template-columns: 1fr; }
       .joint { grid-template-columns: 56px 1fr 82px; gap: 8px; }
       .camera-controls { grid-template-columns: 1fr; }
+      .hamster-panel { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -392,6 +415,7 @@ INDEX_HTML = """<!doctype html>
             <button id="holdButton" onclick="toggleHold()">Hold</button>
             <button onclick="location.href='/teach'">Teaching</button>
             <button onclick="location.href='/model-test'">Model test</button>
+            <button onclick="location.href='/hamster'">Hamster</button>
           </div>
         </div>
         <div id="joints"></div>
@@ -404,7 +428,8 @@ INDEX_HTML = """<!doctype html>
             <button onclick="stopCameraPreview()">Stop live</button>
           </div>
           <div class="camera-view">
-            <img id="cameraImage" alt="Camera preview">
+            <img id="cameraImage" alt="Camera preview" onload="recordCameraFrame()" onerror="clearCameraFramePending()">
+            <span class="fps-counter" id="cameraFps">0 FPS</span>
             <span id="cameraPlaceholder">No camera selected</span>
           </div>
           <div class="camera-meta">
@@ -439,6 +464,32 @@ INDEX_HTML = """<!doctype html>
     let cameraSources = [];
     let activeCameraSource = '';
     let resolutionState = { top_view: "640x480", d405: "640x480" };
+    let cameraFramePending = false;
+    let cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+
+    function resetCameraFps() {
+      cameraFramePending = false;
+      cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+      const el = document.getElementById('cameraFps');
+      if (el) el.textContent = '0 FPS';
+    }
+
+    function clearCameraFramePending() {
+      cameraFramePending = false;
+    }
+
+    function recordCameraFrame() {
+      cameraFramePending = false;
+      const now = Date.now();
+      cameraFpsCounter.count++;
+      if (now - cameraFpsCounter.lastTime >= 1000) {
+        cameraFpsCounter.fps = cameraFpsCounter.count;
+        cameraFpsCounter.count = 0;
+        cameraFpsCounter.lastTime = now;
+        const el = document.getElementById('cameraFps');
+        if (el) el.textContent = `${cameraFpsCounter.fps} FPS`;
+      }
+    }
 
     function log(msg) {
       const el = document.getElementById('log');
@@ -632,6 +683,7 @@ INDEX_HTML = """<!doctype html>
         clearInterval(cameraTimer);
         cameraTimer = null;
       }
+      resetCameraFps();
       img.src = '';
       img.style.display = 'none';
       placeholder.style.display = 'block';
@@ -647,6 +699,8 @@ INDEX_HTML = """<!doctype html>
         placeholder.textContent = 'No camera selected';
         return;
       }
+      if (cameraFramePending) return;
+      cameraFramePending = true;
       img.style.display = 'block';
       placeholder.style.display = 'none';
       img.src = frameUrl;
@@ -676,6 +730,7 @@ INDEX_HTML = """<!doctype html>
 
     async function handleCameraSourceChange() {
       activeCameraSource = selectedCameraSource();
+      resetCameraFps();
       if (!cameraRunning) return;
       await startCameraPreview();
     }
@@ -1097,7 +1152,11 @@ MODEL_TEST_HTML = """<!doctype html>
         <div class="grid">
           <div class="field">
             <label>Checkpoint</label>
-            <input id="checkpoint" type="text" value="/home/mvautl/Documents/Stage/widowx_ai/models/checkpoint_last">
+            <input id="checkpoint" type="text" value="/home/mvautl/Documents/Stage/widowx_ai/models/lerobot_act_push_tape_front_20260512_010000">
+          </div>
+          <div class="field">
+            <label>Primary camera source</label>
+            <input id="primaryCameraSource" type="text" value="usb:8">
           </div>
           <div class="field">
             <label>Steps</label>
@@ -1109,23 +1168,38 @@ MODEL_TEST_HTML = """<!doctype html>
               <option value="20">20 steps</option>
               <option value="30">30 steps</option>
               <option value="50">50 steps - long</option>
+              <option value="75">75 steps</option>
+              <option value="100">100 steps</option>
+              <option value="150">150 steps - max</option>
             </select>
           </div>
           <div class="field">
             <label>Period seconds</label>
-            <input id="period" type="number" min="0.5" max="5" step="0.1" value="1.0">
+            <input id="period" type="number" min="0" step="0.05" value="0">
+          </div>
+          <div class="field">
+            <label>Command move time seconds</label>
+            <input id="commandMoveTime" type="number" min="0" step="0.05" value="0.5">
+          </div>
+          <div class="field">
+            <label>Movement speed <span id="movementSpeedValue">100%</span></label>
+            <input id="movementSpeed" type="range" min="50" max="100" step="1" value="100" oninput="document.getElementById('movementSpeedValue').textContent = `${this.value}%`">
+          </div>
+          <div class="field">
+            <label>Wait after command seconds</label>
+            <input id="waitAfterCommand" type="number" min="0" step="0.05" value="0">
           </div>
           <div class="field">
             <label>Max speed rad/s</label>
-            <input id="maxSpeed" type="number" min="0.02" max="0.20" step="0.01" value="0.05">
+            <input id="maxSpeed" type="number" min="0.001" step="0.01" value="1.0">
           </div>
           <div class="field">
             <label>Max joint step rad</label>
-            <input id="maxStepRad" type="number" min="0.005" max="0.10" step="0.005" value="0.035">
+            <input id="maxStepRad" type="number" min="0.005" max="1.00" step="0.005" value="0.20">
           </div>
           <div class="field">
             <label>Envelope margin rad</label>
-            <input id="envelopeMargin" type="number" min="0.0" max="0.20" step="0.01" value="0.08">
+            <input id="envelopeMargin" type="number" min="0.0" max="3.14" step="0.01" value="3.14">
           </div>
           <div class="field">
             <label>Safety action</label>
@@ -1136,18 +1210,19 @@ MODEL_TEST_HTML = """<!doctype html>
           </div>
           <div class="field">
             <label>Stall error rad</label>
-            <input id="stallErrorRad" type="number" min="0.015" max="0.12" step="0.005" value="0.025">
+            <input id="stallErrorRad" type="number" min="0.015" max="3.14" step="0.005" value="3.14">
           </div>
           <div class="field">
             <label>Stall velocity rad/s</label>
-            <input id="stallVelocity" type="number" min="0.001" max="0.05" step="0.001" value="0.020">
+            <input id="stallVelocity" type="number" min="0" max="1.00" step="0.001" value="0">
           </div>
           <div class="field">
             <label>Stall seconds</label>
-            <input id="stallSeconds" type="number" min="0.1" max="2.0" step="0.05" value="0.20">
+            <input id="stallSeconds" type="number" min="0.1" max="60.0" step="0.05" value="60.0">
           </div>
         </div>
         <label class="armed"><input type="checkbox" id="armed"> enable real model motion</label>
+        <label class="armed"><input type="checkbox" id="softwareSafety"> enable software protections</label>
         <div class="actions">
           <button onclick="connectModelArm()">Connect arm</button>
           <button onclick="disconnectModelArm()">Disconnect arm</button>
@@ -1323,8 +1398,13 @@ MODEL_TEST_HTML = """<!doctype html>
         real,
         armed: document.getElementById('armed').checked,
         checkpoint: document.getElementById('checkpoint').value.trim(),
+        primary_camera_source: document.getElementById('primaryCameraSource').value.trim(),
         steps: Number(document.getElementById('steps').value),
         period: Number(document.getElementById('period').value),
+        command_move_time: Number(document.getElementById('commandMoveTime').value),
+        movement_speed: Number(document.getElementById('movementSpeed').value),
+        wait_after_command: Number(document.getElementById('waitAfterCommand').value),
+        software_safety: document.getElementById('softwareSafety').checked,
         max_speed: Number(document.getElementById('maxSpeed').value),
         max_step_rad: Number(document.getElementById('maxStepRad').value),
         envelope_margin: Number(document.getElementById('envelopeMargin').value),
@@ -1902,7 +1982,7 @@ TEACH_HTML = """<!doctype html>
     }
     .capture-settings-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+      grid-template-columns: minmax(0, 1fr);
       gap: 14px;
       align-items: start;
       margin-top: 12px;
@@ -2010,7 +2090,10 @@ TEACH_HTML = """<!doctype html>
       margin-top: 0;
     }
     .preview-grid.four-up {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .preview-grid.four-up .camera-view {
+      min-height: 300px;
     }
     .preview-panel {
       background: #151a1e;
@@ -2437,6 +2520,7 @@ TEACH_HTML = """<!doctype html>
               <div class="action-row">
                 <button onclick="refreshActPlan(true)">Refresh ACT plan</button>
                 <button class="primary" onclick="startLeRobotExport()">Export LeRobotDataset</button>
+                <button onclick="openActReview()">Open ACT review</button>
                 <button onclick="openMonitor()">Open training monitor</button>
               </div>
               <pre class="act-output" id="actPlanOutput">ACT plan not loaded yet.</pre>
@@ -2541,6 +2625,72 @@ TEACH_HTML = """<!doctype html>
     };
     let pendingFrames = { top_view: false, front: false, wrist_rgb: false, wrist_depth: false };
     let resolutionState = { top_view: "640x480", front: "640x480", d405: "640x480" };
+    const TEACH_CAMERA_SETTINGS_KEY = 'widowxTeachCameraSettings.v1';
+
+    function loadCameraSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(TEACH_CAMERA_SETTINGS_KEY) || '{}');
+      } catch (_err) {
+        return {};
+      }
+    }
+
+    function saveCameraSettings() {
+      const previous = loadCameraSettings();
+      const topSource = document.getElementById('teachCameraSource')?.value || previous.top_source || '';
+      const frontSource = document.getElementById('frontCameraSource')?.value || previous.front_source || '';
+      const settings = {
+        camera_capture_state: cameraCaptureState,
+        resolution_state: resolutionState,
+        top_source: topSource,
+        front_source: frontSource,
+        crop_enabled: Boolean(document.getElementById('datasetCropEnabled')?.checked),
+        crop_target: document.getElementById('datasetCropTarget')?.value || previous.crop_target || 'all',
+        crop_aspect: document.getElementById('datasetCropAspect')?.value || previous.crop_aspect || 'source',
+        crop_zoom: document.getElementById('datasetCropZoom')?.value || previous.crop_zoom || '1',
+        crop_x: document.getElementById('datasetCropX')?.value || previous.crop_x || '0',
+        crop_y: document.getElementById('datasetCropY')?.value || previous.crop_y || '0',
+        replay_speed: document.getElementById('replaySpeed')?.value || previous.replay_speed || '0.75',
+        task_name: document.getElementById('datasetTaskName')?.value || previous.task_name || 'push_cube_5cm'
+      };
+      localStorage.setItem(TEACH_CAMERA_SETTINGS_KEY, JSON.stringify(settings));
+    }
+
+    function applyCameraSettings() {
+      const settings = loadCameraSettings();
+      if (settings.camera_capture_state && typeof settings.camera_capture_state === 'object') {
+        cameraCaptureState = {...cameraCaptureState, ...settings.camera_capture_state};
+      }
+      if (settings.resolution_state && typeof settings.resolution_state === 'object') {
+        resolutionState = {...resolutionState, ...settings.resolution_state};
+      }
+      const pairs = [
+        ['datasetCropEnabled', 'checked', Boolean(settings.crop_enabled)],
+        ['datasetCropTarget', 'value', settings.crop_target],
+        ['datasetCropAspect', 'value', settings.crop_aspect],
+        ['datasetCropZoom', 'value', settings.crop_zoom],
+        ['datasetCropX', 'value', settings.crop_x],
+        ['datasetCropY', 'value', settings.crop_y],
+        ['replaySpeed', 'value', settings.replay_speed],
+        ['datasetTaskName', 'value', settings.task_name]
+      ];
+      pairs.forEach(([id, prop, value]) => {
+        const el = document.getElementById(id);
+        if (el && value !== undefined && value !== null && value !== '') el[prop] = value;
+      });
+      if (document.getElementById('replaySpeedValue') && settings.replay_speed) {
+        document.getElementById('replaySpeedValue').textContent = Number(settings.replay_speed).toFixed(2);
+      }
+      if (document.getElementById('datasetCropZoomValue') && settings.crop_zoom) {
+        document.getElementById('datasetCropZoomValue').textContent = Number(settings.crop_zoom).toFixed(2);
+      }
+      if (document.getElementById('datasetCropXValue') && settings.crop_x) {
+        document.getElementById('datasetCropXValue').textContent = Number(settings.crop_x).toFixed(2);
+      }
+      if (document.getElementById('datasetCropYValue') && settings.crop_y) {
+        document.getElementById('datasetCropYValue').textContent = Number(settings.crop_y).toFixed(2);
+      }
+    }
 
     function populateResolutions() {
       const resSelect = document.getElementById('cameraResolution');
@@ -2563,6 +2713,7 @@ TEACH_HTML = """<!doctype html>
       if (!activeCropRole) return;
       const isD405 = activeCropRole === 'wrist_rgb' || activeCropRole === 'wrist_depth';
       resolutionState[isD405 ? 'd405' : activeCropRole === 'front' ? 'front' : 'top_view'] = document.getElementById('cameraResolution').value;
+      saveCameraSettings();
       updateCaptureSummary();
     }
 
@@ -2588,6 +2739,7 @@ TEACH_HTML = """<!doctype html>
     function updateCameraCaptureEnabled() {
       if (activeCropRole) {
         cameraCaptureState[activeCropRole] = document.getElementById('cameraCaptureEnabled').checked;
+        saveCameraSettings();
         updateCaptureSummary();
         updateCameraLoop();
       }
@@ -2687,6 +2839,17 @@ TEACH_HTML = """<!doctype html>
       }
     }
 
+    async function refreshActReview(writeLog = false) {
+      try {
+        const data = await api('/api/act_review/status');
+        if (writeLog) log(data.message);
+        return data;
+      } catch (err) {
+        if (writeLog) log(`ERROR ACT review: ${err.message}`);
+        return null;
+      }
+    }
+
     async function refreshAll(writeLog = false) {
       try {
         const arm = await api('/api/status');
@@ -2765,7 +2928,11 @@ TEACH_HTML = """<!doctype html>
           const enabled = cameraCaptureState[view.role] !== false;
           view.img.style.display = enabled ? 'block' : 'none';
           view.placeholder.style.display = enabled ? 'none' : 'block';
-          if (!enabled) view.placeholder.textContent = 'Disabled';
+          if (!enabled) {
+            view.img.src = '';
+            pendingFrames[view.role] = false;
+            view.placeholder.textContent = 'Disabled';
+          }
         });
         if (!cameraTimer) cameraTimer = setInterval(updateCameraFrame, 33);
         updateCameraFrame();
@@ -2834,26 +3001,28 @@ TEACH_HTML = """<!doctype html>
         select.appendChild(option);
         if (frontSelect) frontSelect.appendChild(option.cloneNode(true));
       });
-      const preferred = preferredTopCameraSource() || previous || activeSource;
+      const savedSettings = loadCameraSettings();
+      const preferred = savedSettings.top_source || preferredTopCameraSource() || previous || activeSource;
       const exists = teachCameraSources.some((source) => source.id === preferred);
       select.value = exists ? preferred : preferredTopCameraSource();
       if (frontSelect) {
-        const preferredFront = previousFront || preferredFrontCameraSource(select.value);
+        const preferredFront = savedSettings.front_source || previousFront || preferredFrontCameraSource(select.value);
         const frontExists = teachCameraSources.some((source) => source.id === preferredFront);
         frontSelect.value = frontExists ? preferredFront : preferredFrontCameraSource(select.value);
       }
       activeTeachCameraSource = select.value;
+      saveCameraSettings();
       updateCaptureSummary();
     }
 
     function selectedTeachCameraSource() {
       const value = document.getElementById('teachCameraSource').value;
-      return value || '';
+      return teachCameraSources.some((source) => source.id === value) ? value : '';
     }
 
     function selectedFrontCameraSource() {
       const value = document.getElementById('frontCameraSource')?.value;
-      return value || '';
+      return teachCameraSources.some((source) => source.id === value) ? value : '';
     }
 
     function cropRoleLabel(role) {
@@ -2866,8 +3035,25 @@ TEACH_HTML = """<!doctype html>
     }
 
     function selectCropRole(role) {
-      activeCropRole = role;
       const panel = document.getElementById('cropOutputPanel');
+      const shouldHide = panel && activeCropRole === role && !panel.classList.contains('hidden');
+      activeCropRole = role;
+      if (shouldHide) {
+        panel.classList.add('hidden');
+        ['top_view', 'front', 'wrist_rgb', 'wrist_depth'].forEach((candidate) => {
+          const elementId = candidate === 'top_view'
+            ? 'previewPanelTop'
+            : candidate === 'front'
+            ? 'previewPanelFront'
+            : candidate === 'wrist_rgb'
+            ? 'previewPanelWristRgb'
+            : 'previewPanelWristDepth';
+          const element = document.getElementById(elementId);
+          if (element) element.classList.remove('active');
+        });
+        updateCaptureSummary();
+        return;
+      }
       if (panel) panel.classList.remove('hidden');
 
       const topCamField = document.getElementById('topCameraSelectorField');
@@ -2986,6 +3172,7 @@ TEACH_HTML = """<!doctype html>
         <div><strong>Replay:</strong> ${replaySpeed}x · task ${escapeHtml(taskName)}</div>
         <div><strong>Output:</strong> ${Object.keys(cameraCaptureState).filter(k => cameraCaptureState[k]).join(' + ')} at 30 Hz, motor at 100 Hz</div>
       `;
+      saveCameraSettings();
     }
 
     async function refreshTeachCameras(writeLog = false) {
@@ -3009,7 +3196,14 @@ TEACH_HTML = """<!doctype html>
       if (!cameraRunning) return;
       livePreviewViews().forEach((view) => {
         if (!view.source || !view.img) return;
-        if (cameraCaptureState[view.role] === false) return;
+        if (cameraCaptureState[view.role] === false) {
+          view.img.src = '';
+          view.img.style.display = 'none';
+          view.placeholder.style.display = 'block';
+          view.placeholder.textContent = 'Disabled';
+          pendingFrames[view.role] = false;
+          return;
+        }
         if (pendingFrames[view.role]) return;
         
         pendingFrames[view.role] = true;
@@ -3161,15 +3355,17 @@ TEACH_HTML = """<!doctype html>
         const [frontW, frontH] = frontRes.split('x').map(Number);
         const [d405W, d405H] = d405Res.split('x').map(Number);
 
-        if (source && source.startsWith('usb:')) {
+        if (cameraCaptureState.top_view && source && source.startsWith('usb:')) {
           await api('/api/usb_cameras/start', {index: source.split(':')[1], width: topW, height: topH});
-        } else if (source) {
+        } else if (cameraCaptureState.top_view && source) {
           await api('/api/video/start', {source, width: topW, height: topH});
         }
         if (cameraCaptureState.front && frontSource && frontSource.startsWith('usb:')) {
           await api('/api/usb_cameras/start', {index: frontSource.split(':')[1], width: frontW, height: frontH});
         }
-        await api('/api/camera/start', {mode: 'color', width: d405W, height: d405H});
+        if (cameraCaptureState.wrist_rgb || cameraCaptureState.wrist_depth) {
+          await api('/api/camera/start', {mode: 'color', width: d405W, height: d405H});
+        }
         log(`Camera preview started. Top cam: ${topW}x${topH}, front: ${frontW}x${frontH}, D405: ${d405W}x${d405H}`);
         await refreshAll(false);
       } catch (err) {
@@ -3524,7 +3720,7 @@ TEACH_HTML = """<!doctype html>
       const wristDepthImg = document.getElementById('reviewImageWristDepth');
       const wristDepthPlaceholder = document.getElementById('reviewPlaceholderWristDepth');
       const images = frame.images || {};
-      const topImage = images.top_view || frame.image;
+      const topImage = images.top_view || null;
       const frontImage = images.front || null;
       const wristRgbImage = images.wrist_rgb || null;
       const wristDepthImage = images.wrist_depth || null;
@@ -3676,11 +3872,460 @@ TEACH_HTML = """<!doctype html>
       window.open('http://127.0.0.1:7865', '_blank');
     }
 
+    async function openActReview() {
+      try {
+        const data = await api('/api/act_review/start', actPayload());
+        log(data.message);
+        window.open(data.url || 'http://127.0.0.1:7866', '_blank');
+      } catch (err) {
+        log(`ERROR ACT review: ${err.message}`);
+      }
+    }
+
+    applyCameraSettings();
     refreshAll();
     loadRecordings();
     refreshActPlan(false);
     refreshLeRobotExport(false);
     setInterval(() => refreshAll(false), 1500);
+  </script>
+</body>
+</html>
+"""
+
+
+HAMSTER_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hamster Vision Planner</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c20;
+      --panel-2: #20262b;
+      --text: #eef2f4;
+      --muted: #a6b0b8;
+      --accent: #37c48d;
+      --danger: #e45858;
+      --line: #2d363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
+    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 390px;
+      gap: 18px;
+      align-items: start;
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    button {
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    input[type="text"], select {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    .camera-controls, .hamster-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .fps-counter {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.58);
+      color: #f2f6f9;
+      padding: 3px 6px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .camera-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .hamster-panel {
+      grid-template-columns: minmax(0, 1fr);
+      margin: 0;
+    }
+    pre {
+      min-height: 120px;
+      max-height: 260px;
+      overflow: auto;
+      margin: 12px 0 0;
+      white-space: pre-wrap;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .hamster-result-image {
+      width: 100%;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0b0d0f;
+      display: none;
+    }
+    .note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    @media (max-width: 900px) {
+      header { align-items: stretch; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .camera-controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Hamster Vision Planner</h1>
+        <div class="sub">Use a selected local camera frame with the HAMSTER/VILA server on the DGX.</div>
+      </div>
+      <div class="nav">
+        <button onclick="location.href='/'">Control</button>
+        <button onclick="location.href='/teach'">Teaching</button>
+        <button onclick="location.href='/model-test'">Model test</button>
+      </div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2 class="side-title">Camera</h2>
+        <div class="camera-controls">
+          <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
+          <button onclick="refreshCameraHub(true)">Refresh cameras</button>
+          <button onclick="startCameraPreview()">Start live</button>
+          <button onclick="stopCameraPreview()">Stop live</button>
+        </div>
+        <div class="camera-view">
+          <img id="cameraImage" alt="Camera preview" onload="recordCameraFrame()" onerror="clearCameraFramePending()">
+          <span class="fps-counter" id="cameraFps">0 FPS</span>
+          <span id="cameraPlaceholder">No camera selected</span>
+        </div>
+        <div class="camera-meta">
+          <span id="cameraState">Scanning cameras</span>
+          <span id="cameraDetail"></span>
+        </div>
+      </section>
+      <aside>
+        <h2 class="side-title">Hamster</h2>
+        <div class="hamster-panel">
+          <input id="hamsterUrl" type="text" value="http://192.168.100.36:8000" aria-label="Hamster API URL">
+          <input id="hamsterPrompt" type="text" value="Move the tape to the target area" aria-label="Hamster quest">
+          <button class="primary" onclick="sendCameraToHamster()">Send selected frame</button>
+        </div>
+        <pre id="hamsterOutput">Hamster output will appear here.</pre>
+        <img class="hamster-result-image" id="hamsterResultImage" alt="Hamster annotated output">
+        <div class="note">The output image draws the predicted trajectory and gripper actions on the frame sent to Hamster.</div>
+      </aside>
+    </div>
+  </main>
+  <script>
+    let cameraRunning = false;
+    let cameraTimer = null;
+    let cameraSources = [];
+    let activeCameraSource = '';
+    let cameraFramePending = false;
+    let cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+
+    function log(msg) {
+      const output = document.getElementById('hamsterOutput');
+      const stamp = new Date().toLocaleTimeString();
+      output.textContent = `[${stamp}] ${msg}\\n` + output.textContent;
+    }
+
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function resetCameraFps() {
+      cameraFramePending = false;
+      cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+      document.getElementById('cameraFps').textContent = '0 FPS';
+    }
+
+    function clearCameraFramePending() {
+      cameraFramePending = false;
+    }
+
+    function recordCameraFrame() {
+      cameraFramePending = false;
+      const now = Date.now();
+      cameraFpsCounter.count++;
+      if (now - cameraFpsCounter.lastTime >= 1000) {
+        cameraFpsCounter.fps = cameraFpsCounter.count;
+        cameraFpsCounter.count = 0;
+        cameraFpsCounter.lastTime = now;
+        document.getElementById('cameraFps').textContent = `${cameraFpsCounter.fps} FPS`;
+      }
+    }
+
+    function renderCameraSources(sources, activeSource) {
+      const select = document.getElementById('cameraSource');
+      const previous = select.value;
+      cameraSources = Array.isArray(sources) ? sources : [];
+      select.innerHTML = '';
+      if (cameraSources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        select.disabled = true;
+        activeCameraSource = '';
+        return;
+      }
+      select.disabled = false;
+      cameraSources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        select.appendChild(option);
+      });
+      const preferred = activeSource || previous;
+      const exists = cameraSources.some((source) => source.id === preferred);
+      select.value = exists ? preferred : cameraSources[0].id;
+      activeCameraSource = select.value;
+    }
+
+    function selectedCameraSource() {
+      return document.getElementById('cameraSource').value || '';
+    }
+
+    async function refreshCameraHub(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderCameraSources(data.sources || [], data.active_source);
+        activeCameraSource = data.active_source || selectedCameraSource();
+        document.getElementById('cameraState').textContent = data.sources.length
+          ? (data.running ? `Live stream active · ${data.active_label}` : `${data.sources.length} camera(s) detected`)
+          : 'No camera detected';
+        document.getElementById('cameraDetail').textContent = data.active_detail || '';
+        if (writeLog) log(data.message);
+        updateCameraView();
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    function cameraFrameUrl() {
+      const source = selectedCameraSource();
+      if (!source) return '';
+      return `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}`;
+    }
+
+    function stopCameraElement() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (cameraTimer) {
+        clearInterval(cameraTimer);
+        cameraTimer = null;
+      }
+      resetCameraFps();
+      img.src = '';
+      img.style.display = 'none';
+      placeholder.style.display = 'block';
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning) return;
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      if (cameraFramePending) return;
+      cameraFramePending = true;
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      img.src = frameUrl;
+    }
+
+    function updateCameraView() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (!cameraRunning) {
+        stopCameraElement();
+        placeholder.textContent = selectedCameraSource() ? 'Live stream stopped' : 'No camera selected';
+        return;
+      }
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      if (!cameraTimer) cameraTimer = setInterval(updateCameraFrame, 150);
+      img.src = frameUrl;
+    }
+
+    async function handleCameraSourceChange() {
+      activeCameraSource = selectedCameraSource();
+      resetCameraFps();
+      if (!cameraRunning) return;
+      await startCameraPreview();
+    }
+
+    async function startCameraPreview() {
+      try {
+        const source = selectedCameraSource();
+        if (!source) {
+          log('No camera selected');
+          return;
+        }
+        const data = await api('/api/video/start', {source, width: 640, height: 480});
+        log(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function stopCameraPreview() {
+      try {
+        const data = await api('/api/video/stop', {});
+        log(data.message);
+        stopCameraElement();
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function sendCameraToHamster() {
+      const output = document.getElementById('hamsterOutput');
+      const resultImage = document.getElementById('hamsterResultImage');
+      const source = selectedCameraSource();
+      if (!source) {
+        log('ERROR Hamster: no camera selected');
+        return;
+      }
+      try {
+        if (!cameraRunning) await startCameraPreview();
+        output.textContent = 'Sending selected camera frame to Hamster...';
+        resultImage.style.display = 'none';
+        resultImage.removeAttribute('src');
+        const data = await api('/api/hamster/send_camera', {
+          source,
+          base_url: document.getElementById('hamsterUrl').value.trim(),
+          prompt: document.getElementById('hamsterPrompt').value.trim()
+        });
+        output.textContent = data.answer || JSON.stringify(data.raw_response, null, 2);
+        if (data.output_image) {
+          resultImage.src = data.output_image;
+          resultImage.style.display = 'block';
+        }
+      } catch (err) {
+        output.textContent = `ERROR Hamster: ${err.message}`;
+        resultImage.style.display = 'none';
+      }
+    }
+
+    refreshCameraHub(false);
+    setInterval(() => refreshCameraHub(false), 2500);
   </script>
 </body>
 </html>
@@ -3883,6 +4528,10 @@ class CameraController:
                 continue
             if self._is_builtin_laptop_camera_label(label):
                 continue
+            capture = self._probe_usb_capture(index)
+            if capture is None:
+                continue
+            capture.release()
             cameras.append(
                 {
                     "index": index,
@@ -5757,6 +6406,15 @@ class ModelTestRunner:
         return value
 
     @staticmethod
+    def _float_value(payload: dict[str, Any], name: str, default: float, low: float | None = None) -> float:
+        value = float(payload.get(name, default))
+        if not math.isfinite(value):
+            raise RuntimeError(f"{name} must be a finite number.")
+        if low is not None and value < low:
+            raise RuntimeError(f"{name} must be >= {low}.")
+        return value
+
+    @staticmethod
     def _bounded_int(payload: dict[str, Any], name: str, default: int, low: int, high: int) -> int:
         value = int(payload.get(name, default))
         if not low <= value <= high:
@@ -5783,17 +6441,31 @@ class ModelTestRunner:
                 RequestHandler.camera_controller.stop()
 
         checkpoint = str(payload.get("checkpoint") or "widowx_ai/models/act_20260428_084937/best.pt")
-        steps = self._bounded_int(payload, "steps", 1, 1, 50)
-        period = self._bounded_float(payload, "period", 1.0, 0.5, 5.0)
-        max_speed = self._bounded_float(payload, "max_speed", 0.05, 0.02, 0.20)
-        max_step_rad = self._bounded_float(payload, "max_step_rad", 0.035, 0.005, 0.10)
-        envelope_margin = self._bounded_float(payload, "envelope_margin", 0.08, 0.0, 0.20)
+        primary_camera_source = str(payload.get("primary_camera_source") or "").strip()
+        cameras = RequestHandler.camera_controller.usb_status().get("cameras", [])
+        valid_usb_sources = {f"usb:{camera['index']}" for camera in cameras}
+        if primary_camera_source.startswith("usb:") and primary_camera_source not in valid_usb_sources:
+            primary_camera_source = next(iter(sorted(valid_usb_sources)), "")
+        steps = self._bounded_int(payload, "steps", 1, 1, 150)
+        period = self._float_value(payload, "period", 1.0, 0.0)
+        command_move_time = self._float_value(payload, "command_move_time", 0.5, 0.0)
+        movement_speed = self._bounded_float(payload, "movement_speed", 100.0, 50.0, 100.0)
+        wait_after_command = self._float_value(payload, "wait_after_command", 0.5, 0.0)
+        speed_scale = movement_speed / 100.0
+        effective_step_time = wait_after_command
+        if speed_scale < 0.999 and effective_step_time <= 0:
+            base_step_time = command_move_time if command_move_time > 0 else period
+            effective_step_time = max(0.0, (base_step_time / speed_scale) - base_step_time)
+        max_speed = self._float_value(payload, "max_speed", 0.05, 1e-6)
+        max_step_rad = self._bounded_float(payload, "max_step_rad", 0.20, 0.005, 1.00)
+        envelope_margin = self._bounded_float(payload, "envelope_margin", 3.14, 0.0, 3.14)
         collision_action = str(payload.get("collision_action") or "gravity")
         if collision_action not in {"idle", "gravity"}:
             raise RuntimeError("collision_action must be 'idle' or 'gravity'.")
-        stall_error_rad = self._bounded_float(payload, "stall_error_rad", 0.045, 0.015, 0.12)
-        stall_velocity_rad_s = self._bounded_float(payload, "stall_velocity_rad_s", 0.008, 0.001, 0.05)
-        stall_seconds = self._bounded_float(payload, "stall_seconds", 0.35, 0.1, 2.0)
+        software_safety = bool(payload.get("software_safety", False))
+        stall_error_rad = self._bounded_float(payload, "stall_error_rad", 3.14, 0.015, 3.14)
+        stall_velocity_rad_s = self._bounded_float(payload, "stall_velocity_rad_s", 0.0, 0.0, 1.00)
+        stall_seconds = self._bounded_float(payload, "stall_seconds", 60.0, 0.1, 60.0)
 
         command = [
             str(self.python),
@@ -5805,6 +6477,12 @@ class ModelTestRunner:
             str(steps),
             "--period",
             str(period),
+            "--command-move-time",
+            str(command_move_time),
+            "--movement-speed-scale",
+            str(speed_scale),
+            "--wait-after-command",
+            str(wait_after_command),
             "--max-speed",
             str(max_speed),
             "--max-step-rad",
@@ -5828,16 +6506,13 @@ class ModelTestRunner:
             "--timeout",
             str(self.controller.args.timeout),
             "--max-runtime",
-            str(max(10.0, steps * period + 10.0)),
+            str(max(10.0, steps * max(effective_step_time, 0.05) + 10.0)),
         ]
+        if not software_safety:
+            command.append("--disable-software-safety")
+        if primary_camera_source:
+            command.extend(["--primary-camera-source", primary_camera_source])
         
-        cameras = RequestHandler.camera_controller.usb_status().get("cameras", [])
-        if cameras:
-            command.extend([
-                "--top-camera-source", 
-                f"/dev/video{cameras[0]['index']}"
-            ])
-
         if real:
             command.extend(["--real", "--armed"])
 
@@ -6167,6 +6842,99 @@ class LeRobotExportRunner:
                 )
 
 
+class ActReviewRunner:
+    def __init__(self, project_root: Path, planner: ActDatasetPlanner) -> None:
+        self.project_root = project_root
+        self.planner = planner
+        self.python = project_root / "Lerobot" / ".venv-lerobot" / "bin" / "python"
+        self.script = project_root / "scripts" / "lerobot_act_test_interface.py"
+        self.default_checkpoint = project_root / "widowx_ai" / "models" / "checkpoint_last"
+        self.lock = threading.Lock()
+        self.process: subprocess.Popen[str] | None = None
+        self.command: list[str] = []
+        self.last_message = "ACT review ready."
+        self.url = "http://127.0.0.1:7866"
+
+    def _is_running_unlocked(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            if self.process is not None and self.process.poll() is not None:
+                self.process = None
+            return self._status_unlocked(self.last_message)
+
+    def _status_unlocked(self, message: str) -> dict[str, Any]:
+        running = self._is_running_unlocked()
+        return {
+            "ok": True,
+            "running": running,
+            "pid": self.process.pid if running and self.process is not None else None,
+            "url": self.url,
+            "command": ActDatasetPlanner._quote_args(self.command) if self.command else "",
+            "message": message,
+        }
+
+    def start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.python.exists():
+            raise RuntimeError(f"LeRobot Python environment not found: {self.python}")
+        if not self.script.exists():
+            raise RuntimeError(f"ACT review script not found: {self.script}")
+        checkpoint = Path(str(payload.get("checkpoint") or self.default_checkpoint)).expanduser()
+        if not checkpoint.is_absolute():
+            checkpoint = self.project_root / checkpoint
+        checkpoint = checkpoint.resolve()
+        if not checkpoint.exists():
+            raise RuntimeError(f"ACT checkpoint not found: {checkpoint}")
+        plan = self.planner.plan(payload)
+        dataset_root = Path(str(plan["dataset"]["output_root"])).resolve()
+        if not dataset_root.exists():
+            fallback = Path("/tmp/widowx_push_tape_front_lerobot")
+            if fallback.exists():
+                dataset_root = fallback
+            else:
+                raise RuntimeError(
+                    f"LeRobot dataset not found: {dataset_root}. Export LeRobotDataset first."
+                )
+        repo_id = str(payload.get("repo_id") or "local/widowx-push-tape-front")
+        command = [
+            str(self.python),
+            str(self.script),
+            "--dataset-root",
+            str(dataset_root),
+            "--repo-id",
+            repo_id,
+            "--checkpoint",
+            str(checkpoint),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "7866",
+            "--device",
+            "cpu",
+        ]
+        env = os.environ.copy()
+        env.setdefault("HF_HOME", "/tmp/lerobot_hf_cache")
+        env.setdefault("HF_DATASETS_CACHE", "/tmp/lerobot_hf_cache/datasets")
+        env["PYTHONUNBUFFERED"] = "1"
+        with self.lock:
+            if self._is_running_unlocked():
+                return self._status_unlocked("ACT review is already running.")
+            self.command = command
+            self.process = subprocess.Popen(
+                command,
+                cwd=str(self.project_root),
+                env=env,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.last_message = f"ACT review started at {self.url} (PID {self.process.pid})."
+            return self._status_unlocked(self.last_message)
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     controller: ArmController
     camera_controller: CameraController
@@ -6178,6 +6946,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     model_test_runner: ModelTestRunner
     act_dataset_planner: ActDatasetPlanner
     lerobot_export_runner: LeRobotExportRunner
+    act_review_runner: ActReviewRunner
+    hamster_service: HamsterService
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}")
@@ -6237,6 +7007,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(MODEL_TEST_HTML.encode("utf-8"))
             return
+        if parsed.path == "/hamster":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(HAMSTER_HTML.encode("utf-8"))
+            return
         if parsed.path == "/api/status":
             self.send_json(self.controller.status())
             return
@@ -6269,6 +7045,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/lerobot_export/status":
             self.send_json(self.lerobot_export_runner.status())
+            return
+        if parsed.path == "/api/act_review/status":
+            self.send_json(self.act_review_runner.status())
             return
         if parsed.path == "/api/camera/frame":
             try:
@@ -6372,6 +7151,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "/api/model_test/run": lambda: self.model_test_runner.run(payload),
                 "/api/act_dataset/plan": lambda: self.act_dataset_planner.plan(payload),
                 "/api/lerobot_export/start": lambda: self.lerobot_export_runner.start(payload),
+                "/api/act_review/start": lambda: self.act_review_runner.start(payload),
+                "/api/hamster/send_camera": lambda: self.hamster_service.send_camera(payload),
                 "/api/recording/load": lambda: self.recording_library.load(payload),
                 "/api/recording/delete": lambda: self.recording_library.delete(payload),
                 "/api/recordings/clear": self.recording_library.clear,
@@ -6441,6 +7222,8 @@ def main() -> int:
     model_test_runner = ModelTestRunner(project_root, controller)
     act_dataset_planner = ActDatasetPlanner(project_root, recording_library)
     lerobot_export_runner = LeRobotExportRunner(project_root, act_dataset_planner)
+    act_review_runner = ActReviewRunner(project_root, act_dataset_planner)
+    hamster_service = HamsterService(camera_controller)
     RequestHandler.controller = controller
     RequestHandler.camera_controller = camera_controller
     RequestHandler.teach_recorder = teach_recorder
@@ -6451,6 +7234,8 @@ def main() -> int:
     RequestHandler.model_test_runner = model_test_runner
     RequestHandler.act_dataset_planner = act_dataset_planner
     RequestHandler.lerobot_export_runner = lerobot_export_runner
+    RequestHandler.act_review_runner = act_review_runner
+    RequestHandler.hamster_service = hamster_service
     server = ThreadingHTTPServer((args.host, args.port), RequestHandler)
     mode = "REAL ARM ENABLED" if args.real else "dry-run"
     print(f"WidowX AI interface running at http://{args.host}:{args.port} ({mode})")
