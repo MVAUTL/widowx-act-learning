@@ -6,6 +6,7 @@ Full documentation:
 
 - English: [docs/README.en.md](docs/README.en.md)
 - French: [docs/README.fr.md](docs/README.fr.md)
+- HAMSTER/VILA on DGX Spark: [docs/hamster_dgx_spark.fr.md](docs/hamster_dgx_spark.fr.md)
 - Research links and papers: [docs/research/README.md](docs/research/README.md)
 
 ## Project Layout
@@ -35,7 +36,95 @@ Large local artifacts are intentionally ignored by Git:
 
 ## Setup
 
+### Install on a new PC
+
+Clone the repository and enter the project:
+
 ```bash
+git clone https://github.com/MVAUTL/widowx-act-learning.git
+cd widowx-act-learning
+```
+
+Install or select Python 3.10. The control environment is expected to be named `.venv-trossen-ui`:
+
+```bash
+python3.10 -m venv .venv-trossen-ui
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
+.venv-trossen-ui/bin/python -m pip install -r requirements.txt
+```
+
+If `python3.10` is not available but `pyenv` is installed:
+
+```bash
+pyenv install 3.10.12
+pyenv local 3.10.12
+python -m venv .venv-trossen-ui
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
+.venv-trossen-ui/bin/python -m pip install -r requirements.txt
+```
+
+Verify the environment before connecting to the robot:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.robot.widowx_demo --check-import
+.venv-trossen-ui/bin/python -m py_compile widowx_ai/apps/interface.py
+```
+
+Start the interface in dry-run mode first:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.apps.interface --port 7862
+```
+
+Open `http://127.0.0.1:7862/`. If the page loads, stop the server with `Ctrl+C`, connect the robot Ethernet, then start real mode:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.apps.interface --real --ip 192.168.1.2 --variant base --timeout 15 --port 7862
+```
+
+Useful pages after startup:
+
+- Control: `http://127.0.0.1:7862/`
+- Hamster camera planner: `http://127.0.0.1:7862/hamster`
+- Model test: `http://127.0.0.1:7862/model-test`
+- Teaching/data collection: `http://127.0.0.1:7862/teach`
+
+Notes for a fresh PC:
+
+- Large local assets such as `widowx_ai/models/` and `widowx_ai/recordings*/` are not stored in Git.
+- The real robot should be tested in dry-run first, then with `--real` only when the workspace is clear.
+- If USB cameras do not appear, unplug/replug the camera and use `Refresh cameras` in the web UI.
+
+### Minimal local setup
+
+Create the local Python environment used by the control UI:
+
+```bash
+python3.10 -m venv .venv-trossen-ui
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
+.venv-trossen-ui/bin/python -m pip install -r requirements.txt
+```
+
+Verify that the Trossen driver installed correctly:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.robot.widowx_demo --check-import
+```
+
+Expected output includes:
+
+```text
+trossen_arm import OK
+Model wxai_v0 OK: True
+```
+
+If `python3.10` is not available but `pyenv` is installed:
+
+```bash
+pyenv install 3.10.12
+pyenv local 3.10.12
+python -m venv .venv-trossen-ui
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
 .venv-trossen-ui/bin/python -m pip install -r requirements.txt
 ```
 

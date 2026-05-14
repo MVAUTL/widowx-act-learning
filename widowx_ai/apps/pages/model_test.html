@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WidowX AI Model Test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c20;
+      --panel-2: #20262b;
+      --text: #eef2f4;
+      --muted: #a6b0b8;
+      --accent: #37c48d;
+      --danger: #e45858;
+      --warning: #e6b450;
+      --line: #2d363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
+    a { color: var(--accent); text-decoration: none; }
+    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 18px;
+      align-items: start;
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .field label {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    input[type="number"], input[type="text"] {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    button {
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    button.danger { background: #642828; border-color: #9b3d3d; }
+    button.emergency {
+      width: 100%;
+      height: 64px;
+      background: #a51616;
+      border-color: #ff4d4d;
+      color: white;
+      font-size: 20px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .armed {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 0 12px;
+      background: #171a1d;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    input[type="checkbox"] { width: 18px; height: 18px; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0 18px;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    .warning {
+      border: 1px solid #8a6a2a;
+      background: #211a0e;
+      color: #f0d490;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 16px;
+    }
+    .runtime-warning {
+      border: 1px solid #c07a2c;
+      background: #2a1708;
+      color: #ffd28a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 12px;
+    }
+    .runtime-warning.hidden { display: none; }
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 8px 12px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    pre {
+      min-height: 360px;
+      max-height: 560px;
+      overflow: auto;
+      margin: 0;
+      white-space: pre-wrap;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    pre.warning-output {
+      border-color: #c07a2c;
+      background: #120c06;
+      color: #ffd28a;
+    }
+    canvas {
+      width: 100%;
+      height: 320px;
+      display: block;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 14px;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .swatch {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      margin-right: 6px;
+      vertical-align: -1px;
+    }
+    .camera-panel {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .camera-controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    select {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .camera-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .camera-note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    @media (max-width: 880px) {
+      header { align-items: stretch; flex-direction: column; }
+      .layout, .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Model test</h1>
+        <div class="sub">Test tres limite du checkpoint ACT avec garde-fous logiciels</div>
+      </div>
+      <a href="/">Back to control</a>
+    </header>
+    <div class="layout">
+      <section>
+        <button class="emergency" onclick="emergencyStop()">Emergency stop</button>
+        <div class="warning">
+          Le mode reel n'est pas une garantie anti-collision. Pour reduire le risque: table degagee,
+          bras deja proche de la pose de depart, main proche de l'arret d'urgence, vitesse basse,
+          et premier test avec un seul pas.
+        </div>
+        <div class="grid">
+          <div class="field">
+            <label>Checkpoint</label>
+            <input id="checkpoint" type="text" value="/home/mvautl/Documents/Stage/widowx_ai/models/lerobot_act_push_tape_front_20260512_010000">
+          </div>
+          <div class="field">
+            <label>Primary camera source</label>
+            <input id="primaryCameraSource" type="text" value="usb:8">
+          </div>
+          <div class="field">
+            <label>Steps</label>
+            <select id="steps">
+              <option value="1" selected>1 step - first contact</option>
+              <option value="3">3 steps - very short</option>
+              <option value="5">5 steps - short</option>
+              <option value="10">10 steps</option>
+              <option value="20">20 steps</option>
+              <option value="30">30 steps</option>
+              <option value="50">50 steps - long</option>
+              <option value="75">75 steps</option>
+              <option value="100">100 steps</option>
+              <option value="150">150 steps - max</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Period seconds</label>
+            <input id="period" type="number" min="0" step="0.05" value="0">
+          </div>
+          <div class="field">
+            <label>Command move time seconds</label>
+            <input id="commandMoveTime" type="number" min="0" step="0.05" value="0.5">
+          </div>
+          <div class="field">
+            <label>Movement speed <span id="movementSpeedValue">100%</span></label>
+            <input id="movementSpeed" type="range" min="50" max="100" step="1" value="100" oninput="document.getElementById('movementSpeedValue').textContent = `${this.value}%`">
+          </div>
+          <div class="field">
+            <label>Wait after command seconds</label>
+            <input id="waitAfterCommand" type="number" min="0" step="0.05" value="0">
+          </div>
+          <div class="field">
+            <label>Max speed rad/s</label>
+            <input id="maxSpeed" type="number" min="0.001" step="0.01" value="1.0">
+          </div>
+          <div class="field">
+            <label>Max joint step rad</label>
+            <input id="maxStepRad" type="number" min="0.005" max="1.00" step="0.005" value="0.20">
+          </div>
+          <div class="field">
+            <label>Envelope margin rad</label>
+            <input id="envelopeMargin" type="number" min="0.0" max="3.14" step="0.01" value="3.14">
+          </div>
+          <div class="field">
+            <label>Safety action</label>
+            <select id="collisionAction">
+              <option value="gravity" selected>Anti-gravity compensation</option>
+              <option value="idle">Idle / brake motors</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Stall error rad</label>
+            <input id="stallErrorRad" type="number" min="0.015" max="3.14" step="0.005" value="3.14">
+          </div>
+          <div class="field">
+            <label>Stall velocity rad/s</label>
+            <input id="stallVelocity" type="number" min="0" max="1.00" step="0.001" value="0">
+          </div>
+          <div class="field">
+            <label>Stall seconds</label>
+            <input id="stallSeconds" type="number" min="0.1" max="60.0" step="0.05" value="60.0">
+          </div>
+        </div>
+        <label class="armed"><input type="checkbox" id="armed"> enable real model motion</label>
+        <label class="armed"><input type="checkbox" id="softwareSafety"> enable software protections</label>
+        <div class="actions">
+          <button onclick="connectModelArm()">Connect arm</button>
+          <button onclick="disconnectModelArm()">Disconnect arm</button>
+          <button onclick="runModel(false)">Dry-run test</button>
+          <button class="primary" onclick="runModel(true)">REAL run selected steps</button>
+          <button onclick="goToStartPositionModel()">Return to start position</button>
+          <button onclick="openMonitor()">Open training monitor</button>
+        </div>
+        <div class="note">
+          Dry-run utilise une image d'un dataset existant et n'envoie aucun mouvement. Le test reel lance
+          le nombre de pas indique dans Steps, puis remet le bras en mode securite. Il est bloque si la
+          case de confirmation n'est pas cochee.
+        </div>
+        <canvas id="trajectoryChart" width="1000" height="320"></canvas>
+        <div class="legend">
+          <span><span class="swatch" style="background:#37c48d"></span>J0</span>
+          <span><span class="swatch" style="background:#e6b450"></span>J1</span>
+          <span><span class="swatch" style="background:#58a6ff"></span>J2</span>
+          <span><span class="swatch" style="background:#ff7b72"></span>J3</span>
+          <span><span class="swatch" style="background:#c297ff"></span>J4</span>
+          <span><span class="swatch" style="background:#7ee787"></span>J5</span>
+        </div>
+        <div class="camera-panel">
+          <h2 class="side-title">Camera Hub</h2>
+          <div class="camera-controls">
+            <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
+            <button onclick="refreshCameraHub(true)">Refresh cameras</button>
+            <button onclick="startCameraPreview()">Start live</button>
+            <button onclick="stopCameraPreview()">Stop live</button>
+          </div>
+          <div class="camera-view">
+            <img id="cameraImage" alt="Camera preview">
+            <span id="cameraPlaceholder">No camera selected</span>
+          </div>
+          <div class="camera-meta">
+            <span id="cameraState">Scanning cameras</span>
+            <span id="cameraDetail"></span>
+          </div>
+        </div>
+      </section>
+      <aside>
+        <h2 class="side-title">Status</h2>
+        <div class="kv">
+          <div>Interface</div><div id="mode">-</div>
+          <div>Connected</div><div id="connected">-</div>
+          <div>Checkpoint</div><div>best.pt</div>
+        </div>
+        <h2 class="side-title">Output</h2>
+        <div class="runtime-warning hidden" id="modelWarning"></div>
+        <pre id="output">Ready.</pre>
+      </aside>
+    </div>
+  </main>
+  <script>
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function isSafetyWarningText(text) {
+      return /SAFETY WARNING|Force\/stall guard triggered|Target outside training envelope|Max runtime reached/i.test(String(text || ''));
+    }
+
+    function output(text, level = 'info') {
+      const outputElement = document.getElementById('output');
+      const warning = document.getElementById('modelWarning');
+      const warningLevel = level === 'warning' || isSafetyWarningText(text);
+      outputElement.textContent = text;
+      outputElement.classList.toggle('warning-output', warningLevel);
+      if (warning) {
+        warning.classList.toggle('hidden', !warningLevel);
+        warning.textContent = warningLevel
+          ? 'WARNING: a safety guard stopped or limited the model run. Check the details below before relaunching.'
+          : '';
+      }
+    }
+
+    function parseVector(raw) {
+      return raw
+        .replace(/,/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .map(Number)
+        .filter((value) => Number.isFinite(value));
+    }
+
+    function parseTrajectory(text) {
+      const rows = [];
+      const lines = String(text || '').split('\n');
+      for (const line of lines) {
+        const stepMatch = line.match(/^step\s+(\d+):/);
+        const targetMatch = line.match(/target=\[([^\]]+)\]/);
+        if (!stepMatch || !targetMatch) continue;
+        const target = parseVector(targetMatch[1]);
+        if (target.length >= 6) {
+          rows.push({step: Number(stepMatch[1]), target: target.slice(0, 6)});
+        }
+      }
+      return rows;
+    }
+
+    function drawTrajectory(rows) {
+      const canvas = document.getElementById('trajectoryChart');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#0b0d0f';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const pad = {left: 56, right: 18, top: 18, bottom: 40};
+      const w = canvas.width - pad.left - pad.right;
+      const h = canvas.height - pad.top - pad.bottom;
+      ctx.strokeStyle = '#2d363d';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, pad.top);
+      ctx.lineTo(pad.left, pad.top + h);
+      ctx.lineTo(pad.left + w, pad.top + h);
+      ctx.stroke();
+      ctx.fillStyle = '#a6b0b8';
+      ctx.font = '13px ui-sans-serif, system-ui';
+      ctx.fillText('target qpos [rad]', pad.left, 14);
+      ctx.fillText('step', pad.left + w - 28, canvas.height - 12);
+      if (!rows.length) {
+        ctx.fillText('Run a dry-run test to preview model targets.', pad.left + 10, pad.top + 32);
+        return;
+      }
+      const values = rows.flatMap((row) => row.target);
+      let minY = Math.min(...values);
+      let maxY = Math.max(...values);
+      if (Math.abs(maxY - minY) < 1e-6) {
+        minY -= 0.05;
+        maxY += 0.05;
+      }
+      const margin = Math.max(0.03, (maxY - minY) * 0.08);
+      minY -= margin;
+      maxY += margin;
+      const yFor = (value) => pad.top + h - ((value - minY) / (maxY - minY)) * h;
+      const xFor = (index) => pad.left + (rows.length === 1 ? 0 : (index / (rows.length - 1)) * w);
+      const colors = ['#37c48d', '#e6b450', '#58a6ff', '#ff7b72', '#c297ff', '#7ee787'];
+      for (let joint = 0; joint < 6; joint += 1) {
+        ctx.strokeStyle = colors[joint];
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        rows.forEach((row, index) => {
+          const x = xFor(index);
+          const y = yFor(row.target[joint]);
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        rows.forEach((row, index) => {
+          const x = xFor(index);
+          const y = yFor(row.target[joint]);
+          ctx.fillStyle = colors[joint];
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+      ctx.fillStyle = '#a6b0b8';
+      ctx.fillText(maxY.toFixed(2), 8, pad.top + 5);
+      ctx.fillText(minY.toFixed(2), 8, pad.top + h);
+    }
+
+    function payload(real) {
+      return {
+        real,
+        armed: document.getElementById('armed').checked,
+        checkpoint: document.getElementById('checkpoint').value.trim(),
+        primary_camera_source: document.getElementById('primaryCameraSource').value.trim(),
+        steps: Number(document.getElementById('steps').value),
+        period: Number(document.getElementById('period').value),
+        command_move_time: Number(document.getElementById('commandMoveTime').value),
+        movement_speed: Number(document.getElementById('movementSpeed').value),
+        wait_after_command: Number(document.getElementById('waitAfterCommand').value),
+        software_safety: document.getElementById('softwareSafety').checked,
+        max_speed: Number(document.getElementById('maxSpeed').value),
+        max_step_rad: Number(document.getElementById('maxStepRad').value),
+        envelope_margin: Number(document.getElementById('envelopeMargin').value),
+        collision_action: document.getElementById('collisionAction').value,
+        stall_error_rad: Number(document.getElementById('stallErrorRad').value),
+        stall_velocity_rad_s: Number(document.getElementById('stallVelocity').value),
+        stall_seconds: Number(document.getElementById('stallSeconds').value)
+      };
+    }
+
+    async function refreshStatus() {
+      try {
+        const data = await api('/api/status');
+        document.getElementById('mode').textContent = data.config.real ? 'REAL' : 'DRY';
+        document.getElementById('connected').textContent = data.connected ? 'yes' : 'no';
+      } catch (err) {
+        output(`ERROR status: ${err.message}`);
+      }
+    }
+
+    async function connectModelArm() {
+      try {
+        output('Connecting arm...');
+        const data = await api('/api/connect', {});
+        output(data.message);
+        await refreshStatus();
+      } catch (err) {
+        output(`ERROR connect: ${err.message}`);
+      }
+    }
+
+    async function disconnectModelArm() {
+      try {
+        output('Disconnecting arm...');
+        const data = await api('/api/disconnect', {});
+        output(data.message);
+        await refreshStatus();
+      } catch (err) {
+        output(`ERROR disconnect: ${err.message}`);
+      }
+    }
+
+    async function runModel(real) {
+      try {
+        output(real ? 'Preparing real model test...' : 'Running dry-run model test...');
+        if (real) {
+          const status = await api('/api/status');
+          if (status.connected) {
+            output('Disconnecting interface from arm before model test...');
+            await api('/api/disconnect', {});
+            await refreshStatus();
+          }
+        }
+        output('Running model test...');
+        const data = await api('/api/model_test/run', payload(real));
+        output(data.output || data.message, isSafetyWarningText(data.output || data.message) ? 'warning' : 'info');
+        drawTrajectory(parseTrajectory(data.output || ''));
+      } catch (err) {
+        const message = `ERROR model test: ${err.message}`;
+        output(message, isSafetyWarningText(message) ? 'warning' : 'error');
+        drawTrajectory([]);
+      }
+    }
+
+    async function goToStartPositionModel() {
+      try {
+        if (!document.getElementById('armed').checked) {
+          output('ERROR start position: check enable real model motion first.');
+          return;
+        }
+        output('Moving to saved start position...');
+        const data = await api('/api/start_position/go', {armed: true});
+        output(data.message);
+        await refreshStatus();
+      } catch (err) {
+        output(`ERROR start position: ${err.message}`);
+      }
+    }
+
+    async function emergencyStop() {
+      try {
+        const data = await api('/api/emergency_stop', {});
+        output(data.message);
+      } catch (err) {
+        output(`ERROR emergency: ${err.message}`);
+      }
+    }
+
+    function openMonitor() {
+      window.open('http://127.0.0.1:7865', '_blank');
+    }
+
+    let cameraRunning = false;
+    let cameraTimer = null;
+    let cameraSources = [];
+    let activeCameraSource = '';
+    let resolutionState = { top_view: "640x480", d405: "640x480" };
+
+    function renderCameraSources(sources, activeSource) {
+      const select = document.getElementById('cameraSource');
+      const previous = select.value;
+      cameraSources = Array.isArray(sources) ? sources : [];
+      select.innerHTML = '';
+      if (cameraSources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        select.disabled = true;
+        activeCameraSource = '';
+        return;
+      }
+      select.disabled = false;
+      cameraSources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        select.appendChild(option);
+      });
+      const preferred = activeSource || previous;
+      const exists = cameraSources.some((source) => source.id === preferred);
+      select.value = exists ? preferred : cameraSources[0].id;
+      activeCameraSource = select.value;
+    }
+
+    function selectedCameraSource() {
+      const value = document.getElementById('cameraSource').value;
+      return value || '';
+    }
+
+    async function refreshCameraHub(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderCameraSources(data.sources || [], data.active_source);
+        activeCameraSource = data.active_source || selectedCameraSource();
+        document.getElementById('cameraState').textContent = data.sources.length
+          ? (data.running ? `Live stream active · ${data.active_label}` : `${data.sources.length} camera(s) detected`)
+          : 'No camera detected';
+        document.getElementById('cameraDetail').textContent = data.active_detail || '';
+        if (writeLog) output(data.message);
+        updateCameraView();
+      } catch (err) {
+        output(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    function cameraFrameUrl() {
+      const source = selectedCameraSource();
+      if (!source) return '';
+      return `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}`;
+    }
+
+    function stopCameraElement() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (cameraTimer) {
+        clearInterval(cameraTimer);
+        cameraTimer = null;
+      }
+      img.src = '';
+      img.style.display = 'none';
+      placeholder.style.display = 'block';
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning) return;
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      img.src = frameUrl;
+    }
+
+    function updateCameraView() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (!cameraRunning) {
+        stopCameraElement();
+        placeholder.textContent = selectedCameraSource() ? 'Live stream stopped' : 'No camera selected';
+        return;
+      }
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      if (!cameraTimer) {
+        cameraTimer = setInterval(updateCameraFrame, 150);
+      }
+      img.src = frameUrl;
+    }
+
+    async function handleCameraSourceChange() {
+      activeCameraSource = selectedCameraSource();
+      if (!cameraRunning) return;
+      await startCameraPreview();
+    }
+
+    async function startCameraPreview() {
+      try {
+        const source = selectedCameraSource();
+        if (!source) {
+          output('No camera selected');
+          return;
+        }
+        let res = "640x480";
+        if (source.includes('d405')) res = resolutionState.d405;
+        else res = resolutionState.top_view;
+        const [w, h] = res.split('x').map(Number);
+        const data = await api('/api/video/start', {source, width: w, height: h});
+        output(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        output(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function stopCameraPreview() {
+      try {
+        const data = await api('/api/video/stop', {});
+        output(data.message);
+        stopCameraElement();
+        await refreshCameraHub(false);
+      } catch (err) {
+        output(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    refreshStatus();
+    refreshCameraHub(false);
+    drawTrajectory([]);
+    setInterval(refreshStatus, 2000);
+  </script>
+</body>
+</html>

@@ -12,6 +12,7 @@ from datetime import datetime
 import json
 import math
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -28,6 +29,27 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 import trossen_arm
 
+from .config import (
+    DEFAULT_GRAVITY_PAYLOAD,
+    DEFAULT_MAX_SPEED,
+    DEMO,
+    END_EFFECTORS,
+    GRAVITY_PAYLOADS,
+    HOME,
+    JOINT_LIMITS,
+    JOINT_LIMIT_TOLERANCE,
+    MAX_CAMERA_WRIST_EFFORT,
+    MAX_MAX_SPEED,
+    MIN_CAMERA_WRIST_EFFORT,
+    MIN_MAX_SPEED,
+    PACKAGE_ROOT,
+    PROJECT_ROOT,
+    REPLAY_GRIPPER_MAX_SPEED,
+    REST,
+    START_POSITION_MIN_TIME,
+)
+from .hamster import HamsterService
+
 try:
     import cv2
     import pyrealsense2 as rs
@@ -36,3138 +58,16 @@ except ImportError:
     rs = None
 
 
-HOME = np.array([0.0, math.pi / 2, math.pi / 2, 0.0, 0.0, 0.0], dtype=float)
-DEMO = HOME + np.array([0.0, 0.0, 0.0, 0.15, -0.12, 0.0], dtype=float)
-REST = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=float)
-DEFAULT_MAX_SPEED = 0.3
-MIN_MAX_SPEED = 0.05
-MAX_MAX_SPEED = 1.5
-REPLAY_GRIPPER_MAX_SPEED = 0.015
-START_POSITION_MIN_TIME = 2.5
-JOINT_LIMIT_TOLERANCE = 5e-3
-DEFAULT_GRAVITY_PAYLOAD = "d405_follower"
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-PROJECT_ROOT = PACKAGE_ROOT.parent
-MIN_CAMERA_WRIST_EFFORT = -0.6
-MAX_CAMERA_WRIST_EFFORT = 0.6
-JOINT_LIMITS = [
-    (-math.pi, math.pi),
-    (0.0, math.pi),
-    (0.0, 2.3562),
-    (-math.pi / 2, math.pi / 2),
-    (-math.pi / 2, math.pi / 2),
-    (-math.pi, math.pi),
-]
-END_EFFECTORS = {
-    "base": trossen_arm.StandardEndEffector.wxai_v0_base,
-    "leader": trossen_arm.StandardEndEffector.wxai_v0_leader,
-    "follower": trossen_arm.StandardEndEffector.wxai_v0_follower,
-}
-GRAVITY_PAYLOADS = {
-    "variant": None,
-    "d405_follower": trossen_arm.StandardEndEffector.wxai_v0_follower,
-}
+INDEX_HTML = (Path(__file__).resolve().parent / "pages" / "control.html").read_text(encoding="utf-8")
 
 
-INDEX_HTML = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WidowX AI Control</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #101214;
-      --panel: #181c20;
-      --panel-2: #20262b;
-      --text: #eef2f4;
-      --muted: #a6b0b8;
-      --accent: #37c48d;
-      --danger: #e45858;
-      --warning: #e6b450;
-      --line: #2d363d;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      letter-spacing: 0;
-    }
-    main {
-      width: min(1180px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 24px 0 36px;
-    }
-    header {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 18px;
-      margin-bottom: 18px;
-    }
-    h1 {
-      margin: 0;
-      font-size: 30px;
-      line-height: 1.05;
-      font-weight: 720;
-    }
-    .sub {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      min-width: 260px;
-      justify-content: space-between;
-      font-size: 14px;
-    }
-    .status-main {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--danger);
-    }
-    .dot.ok { background: var(--accent); }
-    .dot.warn { background: var(--warning); }
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 340px;
-      gap: 18px;
-      align-items: start;
-    }
-    section, aside {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-    }
-    .toolbar {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 18px;
-    }
-    .tool-group {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: flex-start;
-      align-content: flex-start;
-      min-height: 100%;
-      padding: 10px;
-      background: #151a1e;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-    .tool-meta {
-      width: 100%;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .tool-label {
-      min-width: 92px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-    button {
-      height: 40px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 0 14px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    button:hover { border-color: #52616b; }
-    button.primary { background: #1f5f49; border-color: #2b8c67; }
-    button.danger { background: #642828; border-color: #9b3d3d; }
-    button.emergency {
-      width: 100%;
-      height: 64px;
-      background: #a51616;
-      border-color: #ff4d4d;
-      color: white;
-      font-size: 20px;
-      font-weight: 800;
-      text-transform: uppercase;
-      margin-bottom: 14px;
-    }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    .armed {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 40px;
-      padding: 0 12px;
-      background: #171a1d;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    input[type="checkbox"] { width: 18px; height: 18px; }
-    .joint {
-      display: grid;
-      grid-template-columns: 70px 1fr 92px;
-      gap: 12px;
-      align-items: center;
-      padding: 13px 0;
-      border-top: 1px solid var(--line);
-    }
-    .joint:first-child { border-top: 0; }
-    .joint label {
-      color: var(--muted);
-      font-size: 14px;
-    }
-    input[type="range"] { width: 100%; }
-    input[type="number"], input[type="text"] {
-      width: 100%;
-      height: 38px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #111518;
-      color: var(--text);
-      padding: 0 10px;
-      font-size: 14px;
-    }
-    select {
-      width: 100%;
-      height: 38px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #111518;
-      color: var(--text);
-      padding: 0 10px;
-      font-size: 14px;
-    }
-    .side-title {
-      margin: 0 0 12px;
-      font-size: 15px;
-      color: var(--muted);
-      font-weight: 650;
-      text-transform: uppercase;
-    }
-    .kv {
-      display: grid;
-      grid-template-columns: 110px 1fr;
-      gap: 8px 12px;
-      margin-bottom: 18px;
-      font-size: 14px;
-    }
-    .kv div:nth-child(odd) { color: var(--muted); }
-    pre {
-      min-height: 180px;
-      max-height: 340px;
-      overflow: auto;
-      margin: 0;
-      white-space: pre-wrap;
-      background: #0b0d0f;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 12px;
-      color: #d8dee3;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .camera-panel {
-      margin-top: 18px;
-      padding-top: 18px;
-      border-top: 1px solid var(--line);
-    }
-    .camera-controls {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto auto auto;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    select {
-      width: 100%;
-      height: 40px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #111518;
-      color: var(--text);
-      padding: 0 10px;
-      font-size: 14px;
-    }
-    .camera-view {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 4 / 3;
-      background: #0b0d0f;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      overflow: hidden;
-      display: grid;
-      place-items: center;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    .camera-view img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: none;
-    }
-    .camera-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 13px;
-      margin-top: 8px;
-    }
-    .camera-note {
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    @media (max-width: 880px) {
-      header { align-items: stretch; flex-direction: column; }
-      .layout { grid-template-columns: 1fr; }
-      .toolbar { grid-template-columns: 1fr; }
-      .joint { grid-template-columns: 56px 1fr 82px; gap: 8px; }
-      .camera-controls { grid-template-columns: 1fr; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div>
-        <h1>WidowX AI Control</h1>
-        <div class="sub" id="subtitle"></div>
-      </div>
-      <div class="status"><span class="status-main"><span class="dot warn" id="dot"></span> <span id="state">Initializing</span></span><span id="mode"></span></div>
-    </header>
-    <div class="layout">
-      <section>
-        <button class="emergency" onclick="emergencyStop()">Emergency stop</button>
-        <div class="toolbar">
-          <div class="tool-group">
-            <span class="tool-label">Session</span>
-            <button class="primary" onclick="connectArm()">Connect</button>
-            <button class="danger" onclick="disconnectArm()">Disconnect</button>
-            <button onclick="refreshStatus()">Refresh</button>
-            <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
-          </div>
-          <div class="tool-group">
-            <span class="tool-label">Positions</span>
-            <button onclick="home()">Home</button>
-            <button onclick="goToStartPosition()">Start position</button>
-            <button onclick="saveStartPosition()">Save start</button>
-            <button onclick="rest()">Rest</button>
-          </div>
-          <div class="tool-group">
-            <span class="tool-label">Gripper</span>
-            <button onclick="gripper(10)">Open gripper</button>
-            <button onclick="gripper(-10)">Close gripper</button>
-            <div class="tool-meta">Opening: <span id="gripperStatus">n/a</span></div>
-          </div>
-          <div class="tool-group">
-            <span class="tool-label">Tools</span>
-            <button onclick="gravityCompensation()">Gravity comp</button>
-            <button id="holdButton" onclick="toggleHold()">Hold</button>
-            <button onclick="location.href='/teach'">Teaching</button>
-            <button onclick="location.href='/model-test'">Model test</button>
-          </div>
-        </div>
-        <div id="joints"></div>
-        <div class="camera-panel">
-          <h2 class="side-title">Camera Hub</h2>
-          <div class="camera-controls">
-            <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
-            <button onclick="refreshCameraHub(true)">Refresh cameras</button>
-            <button onclick="startCameraPreview()">Start live</button>
-            <button onclick="stopCameraPreview()">Stop live</button>
-          </div>
-          <div class="camera-view">
-            <img id="cameraImage" alt="Camera preview">
-            <span id="cameraPlaceholder">No camera selected</span>
-          </div>
-          <div class="camera-meta">
-            <span id="cameraState">Scanning cameras</span>
-            <span id="cameraDetail"></span>
-          </div>
-          <div class="camera-note">One control module manages the D405 and all detected USB cameras from the same selector with a continuous live stream.</div>
-        </div>
-      </section>
-      <aside>
-        <h2 class="side-title">Configuration</h2>
-        <div class="kv">
-          <div>IP</div><div id="ip"></div>
-          <div>Variant</div><div id="variant"></div>
-          <div>Port</div><div id="port"></div>
-          <div>Gravity</div><div id="gravity"></div>
-          <div>Max speed</div><div><span id="speedValue"></span> rad/s</div>
-        </div>
-        <input id="speedSlider" type="range" min="0.05" max="1.5" step="0.05" value="0.3" oninput="setMaxSpeed(this.value)">
-        <p class="camera-note">Home, Rest, Demo, Return to start and replay follow this speed limit. Default is 0.30 rad/s.</p>
-        <h2 class="side-title">Log</h2>
-        <pre id="log"></pre>
-      </aside>
-    </div>
-  </main>
-  <script>
-    const limits = LIMITS_PLACEHOLDER;
-    let joints = [0, Math.PI / 2, Math.PI / 2, 0, 0, 0];
-    let config = {};
-    let cameraRunning = false;
-    let cameraTimer = null;
-    let cameraSources = [];
-    let activeCameraSource = '';
-    let resolutionState = { top_view: "640x480", d405: "640x480" };
+MODEL_TEST_HTML = (Path(__file__).resolve().parent / "pages" / "model_test.html").read_text(encoding="utf-8")
 
-    function log(msg) {
-      const el = document.getElementById('log');
-      const stamp = new Date().toLocaleTimeString();
-      el.textContent = `[${stamp}] ${msg}\\n` + el.textContent;
-    }
 
-    async function api(path, payload = null) {
-      const opts = payload ? {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      } : {};
-      const res = await fetch(path, opts);
-      const data = await res.json();
-      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
-      return data;
-    }
+TEACH_HTML = (Path(__file__).resolve().parent / "pages" / "teach.html").read_text(encoding="utf-8")
 
-    function renderJoints() {
-      const root = document.getElementById('joints');
-      root.innerHTML = '';
-      joints.forEach((value, i) => {
-        const row = document.createElement('div');
-        row.className = 'joint';
-        const min = limits[i][0], max = limits[i][1];
-        row.innerHTML = `
-          <label>Joint ${i}</label>
-          <input type="range" min="${min}" max="${max}" step="0.001" value="${value}" oninput="setJoint(${i}, this.value)">
-          <input type="number" min="${min}" max="${max}" step="0.001" value="${value.toFixed(3)}" onchange="setJoint(${i}, this.value)">
-        `;
-        root.appendChild(row);
-      });
-    }
 
-    function setJoint(i, value) {
-      joints[i] = Number(value);
-      renderJoints();
-      move();
-    }
-
-    async function move() {
-      if (!document.getElementById('armed').checked) return;
-      try {
-        const data = await api('/api/move', {positions: joints, armed: true});
-        log(data.message);
-        await refreshStatus(false);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    function updateStatus(data) {
-      config = data.config;
-      if (Array.isArray(data.positions) && data.positions.length >= 6) joints = data.positions.slice(0, 6);
-      document.getElementById('subtitle').textContent = `${config.real ? 'Real mode' : 'Dry-run'} · ${config.ip}`;
-      document.getElementById('mode').textContent = config.real ? 'REAL' : 'DRY';
-      document.getElementById('ip').textContent = config.ip;
-      document.getElementById('variant').textContent = config.variant;
-      document.getElementById('port').textContent = config.port;
-      document.getElementById('gravity').textContent = data.gravity_compensation ? 'on' : 'off';
-      document.getElementById('gripperStatus').textContent = formatGripperStatus(data.gripper_position);
-      document.getElementById('holdButton').textContent = data.hold ? 'Hold off' : 'Hold';
-      document.getElementById('speedValue').textContent = Number(data.max_speed).toFixed(2);
-      document.getElementById('speedSlider').value = data.max_speed;
-      document.getElementById('state').textContent = data.connected ? 'Connected' : 'Disconnected';
-      const dot = document.getElementById('dot');
-      dot.className = 'dot ' + (data.connected ? 'ok' : (config.real ? '' : 'warn'));
-      renderJoints();
-    }
-
-    function formatGripperStatus(position) {
-      if (position == null || !Number.isFinite(Number(position))) return 'n/a';
-      const meters = Number(position);
-      const mm = meters * 1000;
-      return `${mm.toFixed(1)} mm open`;
-    }
-
-    function setBackendOffline(message = 'No backend') {
-      document.getElementById('subtitle').textContent = message;
-      document.getElementById('mode').textContent = 'OFFLINE';
-      document.getElementById('state').textContent = 'No backend';
-      document.getElementById('dot').className = 'dot';
-      document.getElementById('cameraState').textContent = 'No backend';
-      document.getElementById('cameraDetail').textContent = 'Restart the control server';
-      document.getElementById('gripperStatus').textContent = 'n/a';
-      cameraRunning = false;
-      stopCameraElement();
-    }
-
-    async function setMaxSpeed(value) {
-      try {
-        const speed = Number(value);
-        document.getElementById('speedValue').textContent = speed.toFixed(2);
-        const data = await api('/api/max_speed', {max_speed: speed});
-        updateStatus(data);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    function gravityPayload() {
-      return {
-        armed: document.getElementById('armed').checked,
-        payload_profile: 'd405_follower',
-        camera_wrist_effort: 0.0
-      };
-    }
-
-    async function refreshStatus(writeLog = true) {
-      try {
-        const data = await api('/api/status');
-        updateStatus(data);
-        if (writeLog) log('Status updated');
-      } catch (err) {
-        setBackendOffline();
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function emergencyStop() {
-      try {
-        const data = await api('/api/emergency_stop', {});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR emergency: ${err.message}`);
-      }
-    }
-
-    function renderCameraSources(sources, activeSource) {
-      const select = document.getElementById('cameraSource');
-      const previous = select.value;
-      cameraSources = Array.isArray(sources) ? sources : [];
-      select.innerHTML = '';
-      if (cameraSources.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No camera detected';
-        select.appendChild(option);
-        select.disabled = true;
-        activeCameraSource = '';
-        return;
-      }
-      select.disabled = false;
-      cameraSources.forEach((source) => {
-        const option = document.createElement('option');
-        option.value = source.id;
-        option.textContent = source.label;
-        select.appendChild(option);
-      });
-      const preferred = activeSource || previous;
-      const exists = cameraSources.some((source) => source.id === preferred);
-      select.value = exists ? preferred : cameraSources[0].id;
-      activeCameraSource = select.value;
-    }
-
-    function selectedCameraSource() {
-      const value = document.getElementById('cameraSource').value;
-      return value || '';
-    }
-
-    async function refreshCameraHub(writeLog = false) {
-      try {
-        const data = await api('/api/video/status');
-        cameraRunning = data.running;
-        renderCameraSources(data.sources || [], data.active_source);
-        activeCameraSource = data.active_source || selectedCameraSource();
-        document.getElementById('cameraState').textContent = data.sources.length
-          ? (data.running ? `Live stream active · ${data.active_label}` : `${data.sources.length} camera(s) detected`)
-          : 'No camera detected';
-        document.getElementById('cameraDetail').textContent = data.active_detail || '';
-        if (writeLog) log(data.message);
-        updateCameraView();
-      } catch (err) {
-        setBackendOffline();
-        log(`ERROR camera: ${err.message}`);
-      }
-    }
-
-    function cameraFrameUrl() {
-      const source = selectedCameraSource();
-      if (!source) return '';
-      return `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}`;
-    }
-
-    function stopCameraElement() {
-      const img = document.getElementById('cameraImage');
-      const placeholder = document.getElementById('cameraPlaceholder');
-      if (cameraTimer) {
-        clearInterval(cameraTimer);
-        cameraTimer = null;
-      }
-      img.src = '';
-      img.style.display = 'none';
-      placeholder.style.display = 'block';
-    }
-
-    function updateCameraFrame() {
-      if (!cameraRunning) return;
-      const img = document.getElementById('cameraImage');
-      const placeholder = document.getElementById('cameraPlaceholder');
-      const frameUrl = cameraFrameUrl();
-      if (!frameUrl) {
-        stopCameraElement();
-        placeholder.textContent = 'No camera selected';
-        return;
-      }
-      img.style.display = 'block';
-      placeholder.style.display = 'none';
-      img.src = frameUrl;
-    }
-
-    function updateCameraView() {
-      const img = document.getElementById('cameraImage');
-      const placeholder = document.getElementById('cameraPlaceholder');
-      if (!cameraRunning) {
-        stopCameraElement();
-        placeholder.textContent = selectedCameraSource() ? 'Live stream stopped' : 'No camera selected';
-        return;
-      }
-      const frameUrl = cameraFrameUrl();
-      if (!frameUrl) {
-        stopCameraElement();
-        placeholder.textContent = 'No camera selected';
-        return;
-      }
-      img.style.display = 'block';
-      placeholder.style.display = 'none';
-      if (!cameraTimer) {
-        cameraTimer = setInterval(updateCameraFrame, 150);
-      }
-      img.src = frameUrl;
-    }
-
-    async function handleCameraSourceChange() {
-      activeCameraSource = selectedCameraSource();
-      if (!cameraRunning) return;
-      await startCameraPreview();
-    }
-
-    async function startCameraPreview() {
-      try {
-        const source = selectedCameraSource();
-        if (!source) {
-          log('No camera selected');
-          return;
-        }
-        let res = "640x480";
-        if (source.includes('d405')) res = resolutionState.d405;
-        else res = resolutionState.top_view;
-        const [w, h] = res.split('x').map(Number);
-        const data = await api('/api/video/start', {source, width: w, height: h});
-        log(data.message);
-        await refreshCameraHub(false);
-      } catch (err) {
-        log(`ERROR camera: ${err.message}`);
-      }
-    }
-
-    async function stopCameraPreview() {
-      try {
-        const data = await api('/api/video/stop', {});
-        log(data.message);
-        stopCameraElement();
-        await refreshCameraHub(false);
-      } catch (err) {
-        log(`ERROR camera: ${err.message}`);
-      }
-    }
-
-    async function connectArm() {
-      try {
-        const data = await api('/api/connect', {});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function disconnectArm() {
-      try {
-        const data = await api('/api/disconnect', {});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function home() {
-      try {
-        const data = await api('/api/home', {armed: document.getElementById('armed').checked});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function rest() {
-      try {
-        const data = await api('/api/rest', {armed: document.getElementById('armed').checked});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function gripper(effort) {
-      try {
-        const data = await api('/api/gripper', {effort, armed: document.getElementById('armed').checked});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function saveStartPosition() {
-      try {
-        const data = await api('/api/start_position/save', {});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR start position: ${err.message}`);
-      }
-    }
-
-    async function goToStartPosition() {
-      try {
-        const data = await api('/api/start_position/go', {armed: document.getElementById('armed').checked});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR start position: ${err.message}`);
-      }
-    }
-
-    async function gravityCompensation() {
-      try {
-        const data = await api('/api/gravity_compensation', gravityPayload());
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function toggleHold() {
-      try {
-        const payload = gravityPayload();
-        payload.enabled = document.getElementById('holdButton').textContent === 'Hold';
-        const data = await api('/api/hold', payload);
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    refreshStatus();
-    refreshCameraHub();
-    setInterval(() => refreshStatus(false), 2000);
-    setInterval(() => refreshCameraHub(false), 4000);
-  </script>
-</body>
-</html>
-"""
-
-
-MODEL_TEST_HTML = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WidowX AI Model Test</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #101214;
-      --panel: #181c20;
-      --panel-2: #20262b;
-      --text: #eef2f4;
-      --muted: #a6b0b8;
-      --accent: #37c48d;
-      --danger: #e45858;
-      --warning: #e6b450;
-      --line: #2d363d;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      letter-spacing: 0;
-    }
-    main {
-      width: min(1180px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 24px 0 36px;
-    }
-    header {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 18px;
-      margin-bottom: 18px;
-    }
-    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
-    a { color: var(--accent); text-decoration: none; }
-    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 360px;
-      gap: 18px;
-      align-items: start;
-    }
-    section, aside {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .field label {
-      display: block;
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 6px;
-    }
-    input[type="number"], input[type="text"] {
-      width: 100%;
-      height: 38px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #111518;
-      color: var(--text);
-      padding: 0 10px;
-      font-size: 14px;
-    }
-    button {
-      height: 40px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 0 14px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    button:hover { border-color: #52616b; }
-    button.primary { background: #1f5f49; border-color: #2b8c67; }
-    button.danger { background: #642828; border-color: #9b3d3d; }
-    button.emergency {
-      width: 100%;
-      height: 64px;
-      background: #a51616;
-      border-color: #ff4d4d;
-      color: white;
-      font-size: 20px;
-      font-weight: 800;
-      text-transform: uppercase;
-      margin-bottom: 14px;
-    }
-    .armed {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 40px;
-      padding: 0 12px;
-      background: #171a1d;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    input[type="checkbox"] { width: 18px; height: 18px; }
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 14px 0 18px;
-    }
-    .note {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.5;
-      margin-bottom: 16px;
-    }
-    .warning {
-      border: 1px solid #8a6a2a;
-      background: #211a0e;
-      color: #f0d490;
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 13px;
-      line-height: 1.45;
-      margin-bottom: 16px;
-    }
-    .runtime-warning {
-      border: 1px solid #c07a2c;
-      background: #2a1708;
-      color: #ffd28a;
-      border-radius: 8px;
-      padding: 10px 12px;
-      font-size: 13px;
-      line-height: 1.45;
-      margin-bottom: 12px;
-    }
-    .runtime-warning.hidden { display: none; }
-    .side-title {
-      margin: 0 0 12px;
-      font-size: 15px;
-      color: var(--muted);
-      font-weight: 650;
-      text-transform: uppercase;
-    }
-    .kv {
-      display: grid;
-      grid-template-columns: 130px 1fr;
-      gap: 8px 12px;
-      margin-bottom: 18px;
-      font-size: 14px;
-    }
-    .kv div:nth-child(odd) { color: var(--muted); }
-    pre {
-      min-height: 360px;
-      max-height: 560px;
-      overflow: auto;
-      margin: 0;
-      white-space: pre-wrap;
-      background: #0b0d0f;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 12px;
-      color: #d8dee3;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    pre.warning-output {
-      border-color: #c07a2c;
-      background: #120c06;
-      color: #ffd28a;
-    }
-    canvas {
-      width: 100%;
-      height: 320px;
-      display: block;
-      background: #0b0d0f;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      margin-top: 14px;
-    }
-    .legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px 16px;
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .swatch {
-      display: inline-block;
-      width: 11px;
-      height: 11px;
-      border-radius: 2px;
-      margin-right: 6px;
-      vertical-align: -1px;
-    }
-    @media (max-width: 880px) {
-      header { align-items: stretch; flex-direction: column; }
-      .layout, .grid { grid-template-columns: 1fr; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div>
-        <h1>Model test</h1>
-        <div class="sub">Test tres limite du checkpoint ACT avec garde-fous logiciels</div>
-      </div>
-      <a href="/">Back to control</a>
-    </header>
-    <div class="layout">
-      <section>
-        <button class="emergency" onclick="emergencyStop()">Emergency stop</button>
-        <div class="warning">
-          Le mode reel n'est pas une garantie anti-collision. Pour reduire le risque: table degagee,
-          bras deja proche de la pose de depart, main proche de l'arret d'urgence, vitesse basse,
-          et premier test avec un seul pas.
-        </div>
-        <div class="grid">
-          <div class="field">
-            <label>Checkpoint</label>
-            <input id="checkpoint" type="text" value="widowx_ai/models/act_100ep_20260430_0520/best.pt">
-          </div>
-          <div class="field">
-            <label>Steps</label>
-            <select id="steps">
-              <option value="1" selected>1 step - first contact</option>
-              <option value="3">3 steps - very short</option>
-              <option value="5">5 steps - short</option>
-              <option value="10">10 steps</option>
-              <option value="20">20 steps</option>
-              <option value="30">30 steps</option>
-              <option value="50">50 steps - long</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Period seconds</label>
-            <input id="period" type="number" min="0.5" max="5" step="0.1" value="1.0">
-          </div>
-          <div class="field">
-            <label>Max speed rad/s</label>
-            <input id="maxSpeed" type="number" min="0.02" max="0.20" step="0.01" value="0.05">
-          </div>
-          <div class="field">
-            <label>Max joint step rad</label>
-            <input id="maxStepRad" type="number" min="0.005" max="0.10" step="0.005" value="0.035">
-          </div>
-          <div class="field">
-            <label>Envelope margin rad</label>
-            <input id="envelopeMargin" type="number" min="0.0" max="0.20" step="0.01" value="0.08">
-          </div>
-          <div class="field">
-            <label>Safety action</label>
-            <select id="collisionAction">
-              <option value="gravity" selected>Anti-gravity compensation</option>
-              <option value="idle">Idle / brake motors</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Stall error rad</label>
-            <input id="stallErrorRad" type="number" min="0.015" max="0.12" step="0.005" value="0.025">
-          </div>
-          <div class="field">
-            <label>Stall velocity rad/s</label>
-            <input id="stallVelocity" type="number" min="0.001" max="0.05" step="0.001" value="0.020">
-          </div>
-          <div class="field">
-            <label>Stall seconds</label>
-            <input id="stallSeconds" type="number" min="0.1" max="2.0" step="0.05" value="0.20">
-          </div>
-        </div>
-        <label class="armed"><input type="checkbox" id="armed"> enable real model motion</label>
-        <div class="actions">
-          <button onclick="connectModelArm()">Connect arm</button>
-          <button onclick="disconnectModelArm()">Disconnect arm</button>
-          <button onclick="runModel(false)">Dry-run test</button>
-          <button class="primary" onclick="runModel(true)">REAL run selected steps</button>
-          <button onclick="goToStartPositionModel()">Return to start position</button>
-          <button onclick="openMonitor()">Open training monitor</button>
-        </div>
-        <div class="note">
-          Dry-run utilise une image d'un dataset existant et n'envoie aucun mouvement. Le test reel lance
-          le nombre de pas indique dans Steps, puis remet le bras en mode securite. Il est bloque si la
-          case de confirmation n'est pas cochee.
-        </div>
-        <canvas id="trajectoryChart" width="1000" height="320"></canvas>
-        <div class="legend">
-          <span><span class="swatch" style="background:#37c48d"></span>J0</span>
-          <span><span class="swatch" style="background:#e6b450"></span>J1</span>
-          <span><span class="swatch" style="background:#58a6ff"></span>J2</span>
-          <span><span class="swatch" style="background:#ff7b72"></span>J3</span>
-          <span><span class="swatch" style="background:#c297ff"></span>J4</span>
-          <span><span class="swatch" style="background:#7ee787"></span>J5</span>
-        </div>
-      </section>
-      <aside>
-        <h2 class="side-title">Status</h2>
-        <div class="kv">
-          <div>Interface</div><div id="mode">-</div>
-          <div>Connected</div><div id="connected">-</div>
-          <div>Checkpoint</div><div>best.pt</div>
-        </div>
-        <h2 class="side-title">Output</h2>
-        <div class="runtime-warning hidden" id="modelWarning"></div>
-        <pre id="output">Ready.</pre>
-      </aside>
-    </div>
-  </main>
-  <script>
-    async function api(path, payload = null) {
-      const opts = payload ? {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      } : {};
-      const res = await fetch(path, opts);
-      const data = await res.json();
-      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
-      return data;
-    }
-
-    function isSafetyWarningText(text) {
-      return /SAFETY WARNING|Force\\/stall guard triggered|Target outside training envelope|Max runtime reached/i.test(String(text || ''));
-    }
-
-    function output(text, level = 'info') {
-      const outputElement = document.getElementById('output');
-      const warning = document.getElementById('modelWarning');
-      const warningLevel = level === 'warning' || isSafetyWarningText(text);
-      outputElement.textContent = text;
-      outputElement.classList.toggle('warning-output', warningLevel);
-      if (warning) {
-        warning.classList.toggle('hidden', !warningLevel);
-        warning.textContent = warningLevel
-          ? 'WARNING: a safety guard stopped or limited the model run. Check the details below before relaunching.'
-          : '';
-      }
-    }
-
-    function parseVector(raw) {
-      return raw
-        .replace(/,/g, ' ')
-        .trim()
-        .split(/\s+/)
-        .map(Number)
-        .filter((value) => Number.isFinite(value));
-    }
-
-    function parseTrajectory(text) {
-      const rows = [];
-      const lines = String(text || '').split('\\n');
-      for (const line of lines) {
-        const stepMatch = line.match(/^step\\s+(\\d+):/);
-        const targetMatch = line.match(/target=\\[([^\\]]+)\\]/);
-        if (!stepMatch || !targetMatch) continue;
-        const target = parseVector(targetMatch[1]);
-        if (target.length >= 6) {
-          rows.push({step: Number(stepMatch[1]), target: target.slice(0, 6)});
-        }
-      }
-      return rows;
-    }
-
-    function drawTrajectory(rows) {
-      const canvas = document.getElementById('trajectoryChart');
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#0b0d0f';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      const pad = {left: 56, right: 18, top: 18, bottom: 40};
-      const w = canvas.width - pad.left - pad.right;
-      const h = canvas.height - pad.top - pad.bottom;
-      ctx.strokeStyle = '#2d363d';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(pad.left, pad.top);
-      ctx.lineTo(pad.left, pad.top + h);
-      ctx.lineTo(pad.left + w, pad.top + h);
-      ctx.stroke();
-      ctx.fillStyle = '#a6b0b8';
-      ctx.font = '13px ui-sans-serif, system-ui';
-      ctx.fillText('target qpos [rad]', pad.left, 14);
-      ctx.fillText('step', pad.left + w - 28, canvas.height - 12);
-      if (!rows.length) {
-        ctx.fillText('Run a dry-run test to preview model targets.', pad.left + 10, pad.top + 32);
-        return;
-      }
-      const values = rows.flatMap((row) => row.target);
-      let minY = Math.min(...values);
-      let maxY = Math.max(...values);
-      if (Math.abs(maxY - minY) < 1e-6) {
-        minY -= 0.05;
-        maxY += 0.05;
-      }
-      const margin = Math.max(0.03, (maxY - minY) * 0.08);
-      minY -= margin;
-      maxY += margin;
-      const yFor = (value) => pad.top + h - ((value - minY) / (maxY - minY)) * h;
-      const xFor = (index) => pad.left + (rows.length === 1 ? 0 : (index / (rows.length - 1)) * w);
-      const colors = ['#37c48d', '#e6b450', '#58a6ff', '#ff7b72', '#c297ff', '#7ee787'];
-      for (let joint = 0; joint < 6; joint += 1) {
-        ctx.strokeStyle = colors[joint];
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        rows.forEach((row, index) => {
-          const x = xFor(index);
-          const y = yFor(row.target[joint]);
-          if (index === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        rows.forEach((row, index) => {
-          const x = xFor(index);
-          const y = yFor(row.target[joint]);
-          ctx.fillStyle = colors[joint];
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-      ctx.fillStyle = '#a6b0b8';
-      ctx.fillText(maxY.toFixed(2), 8, pad.top + 5);
-      ctx.fillText(minY.toFixed(2), 8, pad.top + h);
-    }
-
-    function payload(real) {
-      return {
-        real,
-        armed: document.getElementById('armed').checked,
-        checkpoint: document.getElementById('checkpoint').value.trim(),
-        steps: Number(document.getElementById('steps').value),
-        period: Number(document.getElementById('period').value),
-        max_speed: Number(document.getElementById('maxSpeed').value),
-        max_step_rad: Number(document.getElementById('maxStepRad').value),
-        envelope_margin: Number(document.getElementById('envelopeMargin').value),
-        collision_action: document.getElementById('collisionAction').value,
-        stall_error_rad: Number(document.getElementById('stallErrorRad').value),
-        stall_velocity_rad_s: Number(document.getElementById('stallVelocity').value),
-        stall_seconds: Number(document.getElementById('stallSeconds').value)
-      };
-    }
-
-    async function refreshStatus() {
-      try {
-        const data = await api('/api/status');
-        document.getElementById('mode').textContent = data.config.real ? 'REAL' : 'DRY';
-        document.getElementById('connected').textContent = data.connected ? 'yes' : 'no';
-      } catch (err) {
-        output(`ERROR status: ${err.message}`);
-      }
-    }
-
-    async function connectModelArm() {
-      try {
-        output('Connecting arm...');
-        const data = await api('/api/connect', {});
-        output(data.message);
-        await refreshStatus();
-      } catch (err) {
-        output(`ERROR connect: ${err.message}`);
-      }
-    }
-
-    async function disconnectModelArm() {
-      try {
-        output('Disconnecting arm...');
-        const data = await api('/api/disconnect', {});
-        output(data.message);
-        await refreshStatus();
-      } catch (err) {
-        output(`ERROR disconnect: ${err.message}`);
-      }
-    }
-
-    async function runModel(real) {
-      try {
-        output(real ? 'Preparing real model test...' : 'Running dry-run model test...');
-        if (real) {
-          const status = await api('/api/status');
-          if (status.connected) {
-            output('Disconnecting interface from arm before model test...');
-            await api('/api/disconnect', {});
-            await refreshStatus();
-          }
-        }
-        output('Running model test...');
-        const data = await api('/api/model_test/run', payload(real));
-        output(data.output || data.message, isSafetyWarningText(data.output || data.message) ? 'warning' : 'info');
-        drawTrajectory(parseTrajectory(data.output || ''));
-      } catch (err) {
-        const message = `ERROR model test: ${err.message}`;
-        output(message, isSafetyWarningText(message) ? 'warning' : 'error');
-        drawTrajectory([]);
-      }
-    }
-
-    async function goToStartPositionModel() {
-      try {
-        if (!document.getElementById('armed').checked) {
-          output('ERROR start position: check enable real model motion first.');
-          return;
-        }
-        output('Moving to saved start position...');
-        const data = await api('/api/start_position/go', {armed: true});
-        output(data.message);
-        await refreshStatus();
-      } catch (err) {
-        output(`ERROR start position: ${err.message}`);
-      }
-    }
-
-    async function emergencyStop() {
-      try {
-        const data = await api('/api/emergency_stop', {});
-        output(data.message);
-      } catch (err) {
-        output(`ERROR emergency: ${err.message}`);
-      }
-    }
-
-    function openMonitor() {
-      window.open('http://127.0.0.1:7865', '_blank');
-    }
-
-    refreshStatus();
-    drawTrajectory([]);
-    setInterval(refreshStatus, 2000);
-  </script>
-</body>
-</html>
-"""
-
-
-TEACH_HTML = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WidowX AI Teaching</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #101214;
-      --panel: #181c20;
-      --panel-2: #20262b;
-      --text: #eef2f4;
-      --muted: #a6b0b8;
-      --accent: #37c48d;
-      --danger: #e45858;
-      --warning: #e6b450;
-      --line: #2d363d;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      letter-spacing: 0;
-    }
-    main {
-      width: min(1180px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 24px 0 36px;
-    }
-    header {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 18px;
-      margin-bottom: 18px;
-    }
-    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
-    a { color: var(--accent); text-decoration: none; }
-    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 340px;
-      gap: 18px;
-      align-items: start;
-    }
-    section, aside {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 18px;
-    }
-    .toolbar {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 18px;
-    }
-    .toolbar-block {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      padding: 12px;
-      background: #111518;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-    }
-    .toolbar-title {
-      min-width: 90px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-    button {
-      height: 40px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--panel-2);
-      color: var(--text);
-      padding: 0 14px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    button:hover { border-color: #52616b; }
-    button.primary { background: #1f5f49; border-color: #2b8c67; }
-    button.danger { background: #642828; border-color: #9b3d3d; }
-    button.emergency {
-      width: 100%;
-      height: 64px;
-      background: #a51616;
-      border-color: #ff4d4d;
-      color: white;
-      font-size: 20px;
-      font-weight: 800;
-      text-transform: uppercase;
-      margin-bottom: 14px;
-    }
-    .armed {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 40px;
-      padding: 0 12px;
-      background: #171a1d;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    input[type="checkbox"] { width: 18px; height: 18px; }
-    input[type="number"], input[type="text"], select {
-      width: 100%;
-      height: 38px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #111518;
-      color: var(--text);
-      padding: 0 10px;
-      font-size: 14px;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 18px;
-    }
-    .field label {
-      display: block;
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 6px;
-    }
-    .camera-view {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 4 / 3;
-      background: #0b0d0f;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      overflow: hidden;
-      display: grid;
-      place-items: center;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    .camera-view img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: none;
-    }
-    .side-title {
-      margin: 0 0 12px;
-      font-size: 15px;
-      color: var(--muted);
-      font-weight: 650;
-      text-transform: uppercase;
-    }
-    .kv {
-      display: grid;
-      grid-template-columns: 120px 1fr;
-      gap: 8px 12px;
-      margin-bottom: 18px;
-      font-size: 14px;
-    }
-    .kv div:nth-child(odd) { color: var(--muted); }
-    pre {
-      min-height: 260px;
-      max-height: 460px;
-      overflow: auto;
-      margin: 0;
-      white-space: pre-wrap;
-      background: #0b0d0f;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 12px;
-      color: #d8dee3;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .note {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
-      margin-bottom: 16px;
-    }
-    .teaching-shell {
-      display: grid;
-      gap: 16px;
-    }
-    .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
-      gap: 14px;
-      align-items: stretch;
-    }
-    .hero-card, .control-card, .review-shell {
-      background: #111518;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 16px;
-    }
-    .hero-card h2, .control-card h3, .review-shell h3 {
-      margin: 0;
-    }
-    .hero-title {
-      font-size: 22px;
-      line-height: 1.15;
-      margin-bottom: 8px;
-    }
-    .hero-copy {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.55;
-      margin-bottom: 14px;
-    }
-    .hero-points {
-      display: grid;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .hero-points strong {
-      color: var(--text);
-      font-weight: 650;
-    }
-    .hero-actions {
-      display: grid;
-      gap: 10px;
-      align-content: start;
-    }
-    .emergency-inline {
-      height: 52px;
-      font-size: 17px;
-      margin-bottom: 0;
-    }
-    .control-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-    }
-    .step-card {
-      background: #151a1e;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
-    }
-    .step-card.review {
-      grid-column: 1 / -1;
-    }
-    .step-card.camera-capture-card {
-      grid-column: 1 / -1;
-    }
-    .step-kicker {
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 750;
-      letter-spacing: 0;
-      text-transform: uppercase;
-      margin-bottom: 6px;
-    }
-    .step-card h3 {
-      margin: 0 0 14px;
-      font-size: 18px;
-      line-height: 1.2;
-    }
-    .card-subtitle {
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
-      margin: 6px 0 14px;
-    }
-    .action-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 14px;
-    }
-    .action-row button {
-      min-width: 120px;
-    }
-    .capture-row {
-      display: grid;
-      grid-template-columns: 88px 88px minmax(160px, 0.9fr);
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .capture-row button {
-      min-width: 0;
-      width: 100%;
-      padding: 0 10px;
-    }
-    .return-start-button {
-      max-width: 180px;
-      justify-self: start;
-    }
-    .secondary-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .secondary-row button {
-      height: 34px;
-      padding: 0 10px;
-      font-size: 13px;
-    }
-    .settings-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 12px;
-    }
-    .crop-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin: 12px 0;
-    }
-    .crop-grid .wide {
-      grid-column: 1 / -1;
-    }
-    .capture-settings-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
-      gap: 14px;
-      align-items: start;
-      margin-top: 12px;
-    }
-    .capture-panel {
-      background: #101417;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-    }
-    .capture-panel h4 {
-      margin: 0 0 12px;
-      font-size: 14px;
-      line-height: 1.2;
-    }
-    .capture-panel.hidden {
-      display: none;
-    }
-    .preview-panel.selectable {
-      cursor: pointer;
-    }
-    .preview-panel.selectable.active {
-      border-color: var(--accent);
-    }
-    .capture-summary {
-      display: grid;
-      gap: 8px;
-      margin-top: 12px;
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #0d1114;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    .capture-summary strong {
-      color: var(--text);
-      font-weight: 650;
-    }
-    .check-field {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 38px;
-      padding: 0 10px;
-      background: #101417;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .mode-summary {
-      display: grid;
-      gap: 8px;
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    .mode-summary strong {
-      color: var(--text);
-      font-weight: 650;
-    }
-    .preview-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      margin-top: 0;
-    }
-    .preview-panel {
-      background: #151a1e;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 14px;
-    }
-    .preview-panel.compact {
-      padding: 12px;
-    }
-    .preview-title {
-      margin: 0 0 10px;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .camera-control-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto auto;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .quick-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 14px;
-    }
-    .quick-actions button {
-      flex: 1 1 160px;
-    }
-    .review-shell {
-      margin-top: 0;
-    }
-    .review-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto auto;
-      gap: 10px;
-      align-items: end;
-      margin-bottom: 12px;
-    }
-    .utility-note {
-      margin-top: 12px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 34px;
-      padding: 0 12px;
-      background: #101417;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 650;
-    }
-    .status-pill.live {
-      color: #ffd8d8;
-      border-color: #8a3a3a;
-      background: #261414;
-    }
-    .status-led {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #5c6770;
-      flex: 0 0 auto;
-    }
-    .status-pill.live .status-led {
-      background: #ff5f5f;
-      box-shadow: 0 0 0 4px rgba(255, 95, 95, 0.18);
-    }
-    .status-pill.ok {
-      color: #d7f7ea;
-      border-color: #2b8c67;
-      background: #112019;
-    }
-    .status-pill.ok .status-led {
-      background: var(--accent);
-      box-shadow: 0 0 0 4px rgba(55, 196, 141, 0.18);
-    }
-    .status-pill.warn .status-led {
-      background: var(--warning);
-      box-shadow: 0 0 0 4px rgba(230, 180, 80, 0.18);
-    }
-    .inline-preview {
-      margin-top: 14px;
-    }
-    .review-meta {
-      min-height: 42px;
-      margin-top: 10px;
-      margin-bottom: 0;
-      overflow-wrap: anywhere;
-    }
-    .review {
-      margin-top: 0;
-    }
-    .review-controls {
-      display: grid;
-      grid-template-columns: 1fr repeat(6, auto);
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .frame-controls {
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      gap: 10px;
-      align-items: center;
-      margin-top: 12px;
-    }
-    .video-controls {
-      display: grid;
-      grid-template-columns: auto auto 1fr;
-      gap: 10px;
-      align-items: center;
-      margin-top: 12px;
-    }
-    .playback-state {
-      color: var(--muted);
-      font-size: 13px;
-      text-align: right;
-      overflow-wrap: anywhere;
-    }
-    input[type="range"] { width: 100%; }
-    @media (max-width: 880px) {
-      header { align-items: stretch; flex-direction: column; }
-      .layout { grid-template-columns: 1fr; }
-      .grid { grid-template-columns: 1fr; }
-      .toolbar, .hero, .control-grid, .preview-grid, .settings-grid, .camera-control-row, .review-head, .capture-settings-grid { grid-template-columns: 1fr; }
-      .capture-row { grid-template-columns: 1fr; }
-      .review-controls { grid-template-columns: 1fr; }
-      .frame-controls { grid-template-columns: 1fr; }
-      .video-controls { grid-template-columns: 1fr; }
-      .playback-state { text-align: left; }
-    }
-  </style>
-</head>
-<body>
-  <main>
-    <header>
-      <div>
-        <h1>Teach</h1>
-        <div class="sub">Collecte simple de demonstrations WidowX avec top cam + D405 RGB/depth</div>
-      </div>
-      <a href="/">Back to control</a>
-    </header>
-    <div class="layout">
-      <section>
-        <div class="toolbar">
-          <div class="toolbar-block">
-            <span class="toolbar-title">Session</span>
-            <button class="primary" onclick="connectArm()">Connect</button>
-            <button class="danger" onclick="disconnectArm()">Disconnect</button>
-            <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
-            <div class="status-pill warn" id="teachConnectionPill">
-              <span class="status-led"></span>
-              <span id="teachConnectionText">Disconnected</span>
-            </div>
-          </div>
-          <div class="toolbar-block">
-            <span class="toolbar-title">Quick tools</span>
-            <button class="danger emergency-inline" onclick="emergencyStop()">Emergency stop</button>
-            <button onclick="gravityCompensation()">Gravity comp</button>
-            <button id="holdButton" onclick="toggleHold()">Hold</button>
-            <button onclick="gripper(10)">Open gripper</button>
-            <button onclick="gripper(-10)">Close gripper</button>
-          </div>
-        </div>
-        <div class="teaching-shell">
-          <input id="cameraMode" type="hidden" value="color">
-          <input id="payloadProfile" type="hidden" value="d405_follower">
-          <input id="wristEffortSlider" type="hidden" value="0">
-          <span id="wristEffortValue" hidden>0.00</span>
-
-          <div class="control-grid">
-            <div class="control-card">
-              <div class="step-kicker">Prepare</div>
-              <h3>Start position</h3>
-              <div class="card-subtitle">Sauvegarde une pose de depart stable, puis ramene toujours le bras ici avant une nouvelle demo.</div>
-              <div class="quick-actions">
-                <button onclick="saveStartPosition()">Save current as start</button>
-                <button class="primary" onclick="goToStartPosition()">Go to start position</button>
-              </div>
-            </div>
-
-            <div class="step-card">
-              <div class="step-kicker">Step 1</div>
-              <h3>Record source motion</h3>
-              <div class="card-subtitle">Passe en gravity compensation, guide le bras a la main, puis sauvegarde une demo source sans video.</div>
-              <div class="field">
-                <label>Source movement name</label>
-                <input id="sourceSessionName" type="text" placeholder="push_cube_source_01">
-              </div>
-              <div class="action-row">
-                <button class="primary" onclick="startRecording()">Start source record</button>
-                <button class="danger" onclick="stopRecording()">Stop record</button>
-              </div>
-              <div class="mode-summary">
-                <div><strong>Source mode:</strong> gravity compensation, motor state at 100 Hz, no camera.</div>
-                <div><strong>Output:</strong> a replayable source movement for dataset capture.</div>
-              </div>
-            </div>
-
-            <div class="step-card camera-capture-card">
-              <div class="step-kicker">Camera</div>
-              <h3>Camera capture</h3>
-              <div class="card-subtitle">Regle les sources video et le crop avant de lancer la capture dataset. La D405 RGB et depth sont enregistrees ensemble.</div>
-              <div class="capture-settings-grid">
-                <div class="capture-panel">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h3 class="preview-title" style="margin-bottom: 0;">Live previews</h3>
-                    <div style="display: flex; gap: 8px;">
-                      <button style="height: 32px;" onclick="refreshTeachCameras(true)">Refresh</button>
-                      <button class="primary" style="height: 32px;" onclick="startCamera()">Start preview</button>
-                    </div>
-                  </div>
-                  <div class="preview-panel inline-preview" style="border: none; padding: 0; background: transparent; margin-top: 0;">
-                    <div class="preview-grid">
-                      <div class="preview-panel compact selectable" id="previewPanelTop" onclick="selectCropRole('top_view')">
-                        <h3 class="preview-title">Top camera</h3>
-                        <div class="camera-view">
-                          <img id="cameraImageTop" alt="Top camera live preview" onload="recordFrame('top_view')" onerror="clearPendingFrame('top_view')">
-                          <span class="fps-counter" id="fpsTop" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
-                          <span id="cameraPlaceholderTop">Camera inactive</span>
-                        </div>
-                      </div>
-                      <div class="preview-panel compact selectable" id="previewPanelWristRgb" onclick="selectCropRole('wrist_rgb')">
-                        <h3 class="preview-title">D405 RGB</h3>
-                        <div class="camera-view">
-                          <img id="cameraImageD405Rgb" alt="D405 RGB live preview" onload="recordFrame('wrist_rgb')" onerror="clearPendingFrame('wrist_rgb')">
-                          <span class="fps-counter" id="fpsWristRgb" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
-                          <span id="cameraPlaceholderD405Rgb">Camera inactive</span>
-                        </div>
-                      </div>
-                      <div class="preview-panel compact selectable" id="previewPanelWristDepth" onclick="selectCropRole('wrist_depth')">
-                        <h3 class="preview-title">D405 depth</h3>
-                        <div class="camera-view">
-                          <img id="cameraImageD405Depth" alt="D405 depth live preview" onload="recordFrame('wrist_depth')" onerror="clearPendingFrame('wrist_depth')">
-                          <span class="fps-counter" id="fpsWristDepth" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
-                          <span id="cameraPlaceholderD405Depth">Camera inactive</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="capture-panel hidden" id="cropOutputPanel">
-                  <h4>Camera Settings</h4>
-                  <div class="field">
-                    <label><input id="cameraCaptureEnabled" type="checkbox" checked onchange="updateCameraCaptureEnabled()"> Enable recording for this camera</label>
-                  </div>
-                  <div class="field" id="resolutionSelectorField">
-                    <label>Resolution</label>
-                    <select id="cameraResolution" onchange="updateCameraResolution()"></select>
-                  </div>
-                  <div class="field" id="topCameraSelectorField" style="display: none;">
-                    <label>Top camera source</label>
-                    <select id="teachCameraSource" onchange="updateCaptureSummary(); updateCameraFrame();"></select>
-                  </div>
-                  <div class="field">
-                    <label><input id="datasetCropEnabled" type="checkbox" onchange="updateCaptureSummary(); updateCameraFrame();"> Crop video flux</label>
-                    <div class="crop-grid">
-                      <div>
-                        <label>Apply crop to</label>
-                        <select id="datasetCropTarget" onchange="updateCaptureSummary(); updateCameraFrame();">
-                          <option value="all" selected>All cameras</option>
-                          <option value="top">Top camera</option>
-                          <option value="d405">D405 RGB/depth</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label>Ratio</label>
-                        <select id="datasetCropAspect" onchange="updateCaptureSummary(); updateCameraFrame();">
-                          <option value="source" selected>Keep source</option>
-                          <option value="1:1">1:1 square</option>
-                          <option value="4:3">4:3</option>
-                          <option value="16:9">16:9</option>
-                          <option value="3:2">3:2</option>
-                          <option value="9:16">9:16 vertical</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label>Zoom <span id="datasetCropZoomValue">1.00</span>x</label>
-                        <input id="datasetCropZoom" type="range" min="1" max="4" step="0.05" value="1" oninput="document.getElementById('datasetCropZoomValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary(); updateCameraFrame();">
-                      </div>
-                      <div>
-                        <label>Offset X <span id="datasetCropXValue">0.00</span></label>
-                        <input id="datasetCropX" type="range" min="-1" max="1" step="0.05" value="0" oninput="document.getElementById('datasetCropXValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary(); updateCameraFrame();">
-                      </div>
-                      <div class="wide">
-                        <label>Offset Y <span id="datasetCropYValue">0.00</span></label>
-                        <input id="datasetCropY" type="range" min="-1" max="1" step="0.05" value="0" oninput="document.getElementById('datasetCropYValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary(); updateCameraFrame();">
-                      </div>
-                    </div>
-                  </div>
-                  <div class="capture-summary" id="captureParamPreview"></div>
-                </div>
-              </div>
-            </div>
-
-            <div class="step-card review">
-              <div class="step-kicker">Step 2</div>
-              <h3>Replay and capture</h3>
-              <div class="card-subtitle">Choisis une demo source, rejoue-la, puis capture simultanement la top cam et la D405 en RGB ou depth.</div>
-              <div class="status-pill" id="datasetCaptureIndicator">
-                <span class="status-led"></span>
-                <span id="datasetCaptureIndicatorText">Capture idle</span>
-              </div>
-              <div class="note">
-                Cette liste ne montre que les demos source rejouables, pas les datasets deja captures.
-              </div>
-              <div class="capture-row">
-                <button onclick="previousSourceRecording()">Previous</button>
-                <button onclick="nextSourceRecording()">Next</button>
-                <button class="return-start-button" onclick="goToStartPosition()">Return to start</button>
-              </div>
-              <div class="field">
-                <label>Recorded demo to replay</label>
-                <select id="recordingSelect" onchange="loadSelectedRecording(); updateCaptureSummary();"></select>
-              </div>
-              <div class="field">
-                <label>Task label</label>
-                <input id="datasetTaskName" type="text" value="push_cube_5cm" placeholder="push_cube_5cm" oninput="updateCaptureSummary()">
-              </div>
-              <div class="field">
-                <label>Replay speed <span id="replaySpeedValue">0.75</span>x</label>
-                <input id="replaySpeed" type="range" min="0.25" max="1" step="0.05" value="0.75" oninput="document.getElementById('replaySpeedValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary();">
-              </div>
-              <div class="action-row">
-                <button onclick="startReplay()">Replay movement</button>
-                <button class="primary" onclick="startDatasetCapture()">Replay movement + record camera</button>
-              </div>
-              <div class="mode-summary">
-                <div><strong>Replay movement:</strong> robot motion only.</div>
-                <div><strong>Replay movement + record camera:</strong> D405 RGB/depth + selected top camera at 30 Hz synchronized with motor samples at 100 Hz.</div>
-              </div>
-              <div class="secondary-row">
-                <button class="danger" onclick="deleteRecording()">Delete selected</button>
-                <button class="danger" onclick="clearRecordings()">Delete all</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="review-shell">
-            <h3>Review</h3>
-            <div class="card-subtitle">Controle visuellement la capture avant de passer a la demo suivante.</div>
-            <div class="review-head">
-              <div class="field">
-                <label>Recording to review</label>
-                <select id="reviewRecordingSelect" onchange="loadReviewRecording()"></select>
-              </div>
-              <button onclick="previousRecording()">Previous</button>
-              <button onclick="nextRecording()">Next</button>
-            </div>
-            <div class="preview-panel compact">
-              <h3 class="preview-title">Selected recording</h3>
-              <div class="preview-grid">
-                <div class="preview-panel">
-                  <h3 class="preview-title">Top camera</h3>
-                  <div class="camera-view">
-                    <img id="reviewImageTop" alt="Recorded top camera preview">
-                    <span id="reviewPlaceholderTop">No recording selected</span>
-                  </div>
-                </div>
-                <div class="preview-panel">
-                  <h3 class="preview-title">Wrist RGB</h3>
-                  <div class="camera-view">
-                    <img id="reviewImageWristRgb" alt="Recorded wrist RGB preview">
-                    <span id="reviewPlaceholderWristRgb">No recording selected</span>
-                  </div>
-                </div>
-                <div class="preview-panel">
-                  <h3 class="preview-title">Wrist depth</h3>
-                  <div class="camera-view">
-                    <img id="reviewImageWristDepth" alt="Recorded wrist depth preview">
-                    <span id="reviewPlaceholderWristDepth">No recording selected</span>
-                  </div>
-                </div>
-              </div>
-              <div class="video-controls">
-                <button id="reviewPlayButton" onclick="toggleReviewPlayback()">Play</button>
-                <button onclick="stopReviewPlayback(true)">Stop</button>
-                <div class="playback-state" id="reviewPlaybackState">0:00 / 0:00</div>
-              </div>
-              <div class="frame-controls">
-                <button onclick="stepFrame(-1)">Frame -</button>
-                <input id="frameSlider" type="range" min="0" max="0" step="1" value="0" oninput="showFrame(Number(this.value))">
-                <button onclick="stepFrame(1)">Frame +</button>
-              </div>
-              <div class="note review-meta" id="reviewMeta"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <aside>
-        <h2 class="side-title">Status</h2>
-        <div class="kv">
-          <div>Camera</div><div id="cameraState">-</div>
-          <div>Start pos</div><div id="startPoseState">-</div>
-          <div>Record</div><div id="recordState">-</div>
-          <div>Replay</div><div id="replayState">-</div>
-          <div>Dataset</div><div id="datasetState">-</div>
-          <div>Samples</div><div id="samples">0</div>
-          <div>Folder</div><div id="sessionDir">-</div>
-        </div>
-        <h2 class="side-title">Log</h2>
-        <pre id="log"></pre>
-      </aside>
-    </div>
-  </main>
-  <script>
-    let cameraTimer = null;
-    let cameraRunning = false;
-    let teachCameraSources = [];
-    let activeTeachCameraSource = '';
-    let recordings = [];
-    let reviewRecordings = [];
-    let selectedRecording = null;
-    let reviewFrames = [];
-    let reviewIndex = 0;
-    let reviewPlaying = false;
-    let reviewPlaybackTimer = null;
-    let lastDatasetRunning = false;
-    let activeCropRole = 'all';
-    let cameraCaptureState = { top_view: true, wrist_rgb: true, wrist_depth: true };
-    let fpsCounters = { top_view: { count: 0, lastTime: Date.now(), fps: 0 }, wrist_rgb: { count: 0, lastTime: Date.now(), fps: 0 }, wrist_depth: { count: 0, lastTime: Date.now(), fps: 0 } };
-    let pendingFrames = { top_view: false, wrist_rgb: false, wrist_depth: false };
-    let resolutionState = { top_view: "640x480", d405: "640x480" };
-
-    function populateResolutions() {
-      const resSelect = document.getElementById('cameraResolution');
-      if (!resSelect || !activeCropRole) return;
-      const isD405 = activeCropRole === 'wrist_rgb' || activeCropRole === 'wrist_depth';
-      const options = isD405
-        ? ["640x480", "848x480", "1280x720"]
-        : ["640x480", "800x600", "1280x720", "1920x1080"];
-      resSelect.innerHTML = '';
-      options.forEach(opt => {
-        const option = document.createElement('option');
-        option.value = opt;
-        option.textContent = opt;
-        resSelect.appendChild(option);
-      });
-      resSelect.value = resolutionState[isD405 ? 'd405' : 'top_view'];
-    }
-
-    function updateCameraResolution() {
-      if (!activeCropRole) return;
-      const isD405 = activeCropRole === 'wrist_rgb' || activeCropRole === 'wrist_depth';
-      resolutionState[isD405 ? 'd405' : 'top_view'] = document.getElementById('cameraResolution').value;
-      updateCaptureSummary();
-    }
-
-    function clearPendingFrame(role) {
-      pendingFrames[role] = false;
-    }
-
-    function recordFrame(role) {
-      pendingFrames[role] = false;
-      const now = Date.now();
-      const counter = fpsCounters[role];
-      counter.count++;
-      if (now - counter.lastTime >= 1000) {
-        counter.fps = counter.count;
-        counter.count = 0;
-        counter.lastTime = now;
-        const elId = role === 'top_view' ? 'fpsTop' : (role === 'wrist_rgb' ? 'fpsWristRgb' : 'fpsWristDepth');
-        const el = document.getElementById(elId);
-        if (el) el.textContent = `${counter.fps} FPS`;
-      }
-    }
-
-    function updateCameraCaptureEnabled() {
-      if (activeCropRole) {
-        cameraCaptureState[activeCropRole] = document.getElementById('cameraCaptureEnabled').checked;
-        updateCaptureSummary();
-        updateCameraLoop();
-      }
-    }
-
-    function log(msg) {
-      const el = document.getElementById('log');
-      const stamp = new Date().toLocaleTimeString();
-      el.textContent = `[${stamp}] ${msg}\\n` + el.textContent;
-    }
-
-    async function api(path, payload = null) {
-      const opts = payload ? {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      } : {};
-      const res = await fetch(path, opts);
-      const data = await res.json();
-      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
-      return data;
-    }
-
-    async function refreshAll(writeLog = false) {
-      try {
-        const arm = await api('/api/status');
-        const pill = document.getElementById('teachConnectionPill');
-        document.getElementById('teachConnectionText').textContent = arm.connected ? 'Connected' : 'Disconnected';
-        pill.className = 'status-pill ' + (arm.connected ? 'ok' : 'warn');
-        document.getElementById('startPoseState').textContent = arm.start_position_saved
-          ? `Saved · ${arm.start_position_label || 'ready'}`
-          : 'Not saved';
-        document.getElementById('payloadProfile').value = 'd405_follower';
-        document.getElementById('wristEffortSlider').value = 0;
-        document.getElementById('wristEffortValue').textContent = '0.00';
-        const cam = await api('/api/video/status');
-        cameraRunning = cam.running;
-        renderTeachCameraSources(cam.sources || [], cam.active_source);
-        activeTeachCameraSource = cam.active_source || selectedTeachCameraSource();
-        document.getElementById('cameraState').textContent = cam.sources.length
-          ? (cam.running ? `Active · ${cam.active_label}` : `${cam.sources.length} detected`)
-          : 'Not detected';
-        document.getElementById('cameraMode').value = 'color';
-        const trossenUi = await api('/api/trossen_ui/status');
-        const trossenUiState = document.getElementById('trossenUiState');
-        if (trossenUiState) {
-          trossenUiState.textContent = trossenUi.running
-            ? `Running PID ${trossenUi.pid}`
-            : (trossenUi.available ? 'Ready' : 'Not installed');
-        }
-        const rec = await api('/api/teach/status');
-        document.getElementById('recordState').textContent = rec.running ? 'Recording' : 'Stop';
-        document.getElementById('samples').textContent = rec.mode === 'high_smooth'
-          ? `${rec.motor_samples} motor / ${rec.samples} img`
-          : rec.samples;
-        document.getElementById('sessionDir').textContent = rec.session_dir || '-';
-        const replay = await api('/api/replay/status');
-        document.getElementById('replayState').textContent = replay.running
-          ? `${replay.frame_index}/${replay.frame_count}`
-          : 'Stop';
-        const dataset = await api('/api/dataset_capture/status');
-        document.getElementById('datasetState').textContent = dataset.running ? 'Capturing' : 'Idle';
-        const datasetIndicator = document.getElementById('datasetCaptureIndicator');
-        const datasetIndicatorText = document.getElementById('datasetCaptureIndicatorText');
-        if (datasetIndicator && datasetIndicatorText) {
-          datasetIndicator.classList.toggle('live', Boolean(dataset.running));
-          datasetIndicatorText.textContent = dataset.running ? 'Capture camera active' : 'Capture idle';
-        }
-        if (lastDatasetRunning && !dataset.running) {
-          log(dataset.message);
-          await loadRecordings(null, dataset.source_path, dataset.session_dir);
-        }
-        lastDatasetRunning = dataset.running;
-        document.getElementById('holdButton').textContent = arm.hold ? 'Hold off' : 'Hold';
-        updateCaptureSummary();
-        updateCameraLoop();
-        if (writeLog) log('Status updated');
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function emergencyStop() {
-      try {
-        const data = await api('/api/emergency_stop', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR emergency: ${err.message}`);
-      }
-    }
-
-    function updateCameraLoop() {
-      const views = livePreviewViews();
-      if (cameraRunning && selectedTeachCameraSource()) {
-        views.forEach((view) => {
-          const enabled = cameraCaptureState[view.role] !== false;
-          view.img.style.display = enabled ? 'block' : 'none';
-          view.placeholder.style.display = enabled ? 'none' : 'block';
-          if (!enabled) view.placeholder.textContent = 'Disabled';
-        });
-        if (!cameraTimer) cameraTimer = setInterval(updateCameraFrame, 33);
-        updateCameraFrame();
-      } else {
-        views.forEach((view) => {
-          view.img.style.display = 'none';
-          view.placeholder.style.display = 'block';
-          view.placeholder.textContent = selectedTeachCameraSource() ? 'Camera inactive' : 'No camera selected';
-        });
-        if (cameraTimer) {
-          clearInterval(cameraTimer);
-          cameraTimer = null;
-        }
-      }
-    }
-
-    function preferredTopCameraSource() {
-      const usb0 = teachCameraSources.find((source) => source.id === 'usb:0');
-      if (usb0) return usb0.id;
-      const brio = teachCameraSources.find((source) => String(source.label || '').toLowerCase().includes('brio'));
-      if (brio) return brio.id;
-      return teachCameraSources.length ? teachCameraSources[0].id : '';
-    }
-
-    function teachCameraOptionLabel(source) {
-      if (source.id === 'usb:0') {
-        return `${source.label} · top cam par defaut`;
-      }
-      return source.label;
-    }
-
-    function renderTeachCameraSources(sources, activeSource) {
-      const select = document.getElementById('teachCameraSource');
-      const previous = select.value;
-      teachCameraSources = Array.isArray(sources) ? sources : [];
-      select.innerHTML = '';
-      if (teachCameraSources.length === 0) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No camera detected';
-        select.appendChild(option);
-        select.disabled = true;
-        activeTeachCameraSource = '';
-        updateCaptureSummary();
-        return;
-      }
-      select.disabled = false;
-      teachCameraSources.forEach((source) => {
-        const option = document.createElement('option');
-        option.value = source.id;
-        option.textContent = teachCameraOptionLabel(source);
-        select.appendChild(option);
-      });
-      const preferred = preferredTopCameraSource() || previous || activeSource;
-      const exists = teachCameraSources.some((source) => source.id === preferred);
-      select.value = exists ? preferred : preferredTopCameraSource();
-      activeTeachCameraSource = select.value;
-      updateCaptureSummary();
-    }
-
-    function selectedTeachCameraSource() {
-      const value = document.getElementById('teachCameraSource').value;
-      return value || '';
-    }
-
-    function cropRoleLabel(role) {
-      if (role === 'all') return 'All cameras';
-      if (role === 'top_view') return 'Top camera';
-      if (role === 'wrist_rgb') return 'D405 RGB';
-      if (role === 'wrist_depth') return 'D405 depth';
-      return 'Click a preview';
-    }
-
-    function selectCropRole(role) {
-      activeCropRole = role;
-      const panel = document.getElementById('cropOutputPanel');
-      if (panel) panel.classList.remove('hidden');
-
-      const topCamField = document.getElementById('topCameraSelectorField');
-      if (topCamField) {
-        topCamField.style.display = (role === 'top_view') ? 'block' : 'none';
-      }
-
-      populateResolutions();
-
-      const captureEnabledCheckbox = document.getElementById('cameraCaptureEnabled');
-      if (captureEnabledCheckbox) {
-        captureEnabledCheckbox.checked = cameraCaptureState[role] !== false;
-      }
-
-      const enabled = document.getElementById('datasetCropEnabled');
-      if (enabled) enabled.checked = true;
-      ['top_view', 'wrist_rgb', 'wrist_depth'].forEach((candidate) => {
-        const elementId = candidate === 'top_view'
-          ? 'previewPanelTop'
-          : candidate === 'wrist_rgb'
-          ? 'previewPanelWristRgb'
-          : 'previewPanelWristDepth';
-        const element = document.getElementById(elementId);
-        if (element) element.classList.toggle('active', candidate === role);
-      });
-      updateCaptureSummary();
-      updateCameraFrame();
-    }
-
-    function livePreviewViews() {
-      return [
-        {
-          source: selectedTeachCameraSource(),
-          role: 'top_view',
-          img: document.getElementById('cameraImageTop'),
-          placeholder: document.getElementById('cameraPlaceholderTop')
-        },
-        {
-          source: 'd405:color',
-          role: 'wrist_rgb',
-          img: document.getElementById('cameraImageD405Rgb'),
-          placeholder: document.getElementById('cameraPlaceholderD405Rgb')
-        },
-        {
-          source: 'd405:depth',
-          role: 'wrist_depth',
-          img: document.getElementById('cameraImageD405Depth'),
-          placeholder: document.getElementById('cameraPlaceholderD405Depth')
-        }
-      ];
-    }
-
-    function cropQueryString(crop) {
-      if (!crop) return '';
-      const params = new URLSearchParams({
-        crop_enabled: '1',
-        crop_aspect: crop.aspect,
-        crop_zoom: String(crop.zoom),
-        crop_x: String(crop.offset_x),
-        crop_y: String(crop.offset_y)
-      });
-      return `&${params.toString()}`;
-    }
-
-    function selectedTeachCameraLabel() {
-      const sourceId = selectedTeachCameraSource();
-      const source = teachCameraSources.find((item) => item.id === sourceId);
-      return source ? source.label : (sourceId || 'None');
-    }
-
-    function escapeHtml(value) {
-      return String(value).replace(/[&<>"']/g, (char) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-      }[char]));
-    }
-
-    function updateCaptureSummary() {
-      const preview = document.getElementById('captureParamPreview');
-      if (!preview) return;
-      const cropEnabled = Boolean(document.getElementById('datasetCropEnabled')?.checked);
-      const cropTarget = document.getElementById('datasetCropTarget')?.value || 'all';
-      const cropAspect = document.getElementById('datasetCropAspect')?.value || 'source';
-      const cropZoom = Number(document.getElementById('datasetCropZoom')?.value || 1).toFixed(2);
-      const cropX = Number(document.getElementById('datasetCropX')?.value || 0).toFixed(2);
-      const cropY = Number(document.getElementById('datasetCropY')?.value || 0).toFixed(2);
-      const replaySpeed = Number(document.getElementById('replaySpeed')?.value || 0.75).toFixed(2);
-      const taskName = document.getElementById('datasetTaskName')?.value.trim() || 'no task label';
-      const sourceName = selectedTeachCameraLabel();
-      const cropText = cropEnabled
-        ? `${cropTarget}, ratio ${cropAspect}, zoom ${cropZoom}x, x ${cropX}, y ${cropY}`
-        : 'disabled';
-      preview.innerHTML = `
-        <div><strong>Top camera:</strong> ${cameraCaptureState.top_view ? escapeHtml(sourceName) + ' (' + resolutionState.top_view + ')' : 'disabled'}</div>
-        <div><strong>D405:</strong> ${cameraCaptureState.wrist_rgb ? 'RGB ' : ''}${cameraCaptureState.wrist_depth ? 'Depth' : ''}${!cameraCaptureState.wrist_rgb && !cameraCaptureState.wrist_depth ? 'disabled' : ''} (${resolutionState.d405})</div>
-        <div><strong>Selected crop preview:</strong> ${escapeHtml(cropRoleLabel(activeCropRole))}</div>
-        <div><strong>Crop:</strong> ${escapeHtml(cropText)}</div>
-        <div><strong>Replay:</strong> ${replaySpeed}x · task ${escapeHtml(taskName)}</div>
-        <div><strong>Output:</strong> ${Object.keys(cameraCaptureState).filter(k => cameraCaptureState[k]).join(' + ')} at 30 Hz, motor at 100 Hz</div>
-      `;
-    }
-
-    async function refreshTeachCameras(writeLog = false) {
-      try {
-        const data = await api('/api/video/status');
-        cameraRunning = data.running;
-        renderTeachCameraSources(data.sources || [], data.active_source);
-        activeTeachCameraSource = data.active_source || selectedTeachCameraSource();
-        document.getElementById('cameraState').textContent = data.sources.length
-          ? (data.running ? `Active · ${data.active_label}` : `${data.sources.length} detected`)
-          : 'Not detected';
-        if (writeLog) log(data.message);
-        updateCaptureSummary();
-        updateCameraLoop();
-      } catch (err) {
-        log(`ERROR camera: ${err.message}`);
-      }
-    }
-
-    function updateCameraFrame() {
-      if (!cameraRunning) return;
-      livePreviewViews().forEach((view) => {
-        if (!view.source || !view.img) return;
-        if (cameraCaptureState[view.role] === false) return;
-        if (pendingFrames[view.role]) return;
-        
-        pendingFrames[view.role] = true;
-        const cropQuery = cropQueryString(datasetCropConfig(view.role));
-        view.img.src = `/api/video/frame?source=${encodeURIComponent(view.source)}${cropQuery}&t=${Date.now()}`;
-      });
-    }
-
-    async function connectArm() {
-      try {
-        const data = await api('/api/connect', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function disconnectArm() {
-      try {
-        const data = await api('/api/disconnect', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function gravityCompensation() {
-      try {
-        const data = await api('/api/gravity_compensation', gravityPayload());
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function saveStartPosition() {
-      try {
-        const data = await api('/api/start_position/save', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR start position: ${err.message}`);
-      }
-    }
-
-    async function goToStartPosition() {
-      try {
-        const replay = await api('/api/replay/status');
-        if (replay.running) {
-          const stop = await api('/api/replay/stop', {});
-          log(stop.message);
-          await new Promise((resolve) => setTimeout(resolve, 250));
-        }
-        const data = await api('/api/start_position/go', {armed: document.getElementById('armed').checked});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR start position: ${err.message}`);
-      }
-    }
-
-    async function toggleHold() {
-      try {
-        const payload = gravityPayload();
-        payload.enabled = document.getElementById('holdButton').textContent === 'Hold';
-        const data = await api('/api/hold', payload);
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function gripper(effort) {
-      try {
-        const data = await api('/api/gripper', {effort, armed: document.getElementById('armed').checked});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR: ${err.message}`);
-      }
-    }
-
-    function gravityPayload() {
-      return {
-        armed: document.getElementById('armed').checked,
-        payload_profile: 'd405_follower',
-        camera_wrist_effort: 0
-      };
-    }
-
-    async function refreshTrossenUI(writeLog = false) {
-      try {
-        const data = await api('/api/trossen_ui/status');
-        const trossenUiState = document.getElementById('trossenUiState');
-        if (trossenUiState) {
-          trossenUiState.textContent = data.running
-            ? `Running PID ${data.pid}`
-            : (data.available ? 'Ready' : 'Not installed');
-        }
-        if (writeLog) log(data.message);
-      } catch (err) {
-        log(`ERROR Trossen UI: ${err.message}`);
-      }
-    }
-
-    async function startTrossenUI() {
-      try {
-        await api('/api/video/stop', {});
-        const data = await api('/api/trossen_ui/start', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR Trossen UI: ${err.message}`);
-      }
-    }
-
-    async function stopTrossenUI() {
-      try {
-        const data = await api('/api/trossen_ui/stop', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR Trossen UI: ${err.message}`);
-      }
-    }
-
-    function setGravityControls() {
-      const effort = Number(document.getElementById('wristEffortSlider').value);
-      document.getElementById('wristEffortValue').textContent = effort.toFixed(2);
-    }
-
-    async function startCamera() {
-      try {
-        const source = selectedTeachCameraSource();
-        if (!source) {
-          log('ERROR camera: select a camera first');
-          return;
-        }
-        
-        const topRes = resolutionState.top_view || "640x480";
-        const d405Res = resolutionState.d405 || "640x480";
-        const [topW, topH] = topRes.split('x').map(Number);
-        const [d405W, d405H] = d405Res.split('x').map(Number);
-
-        if (source.startsWith('usb:')) {
-          await api('/api/usb_cameras/start', {index: source.split(':')[1], width: topW, height: topH});
-        } else {
-          await api('/api/video/start', {source, width: topW, height: topH});
-        }
-        await api('/api/camera/start', {mode: 'color', width: d405W, height: d405H});
-        log(`Camera preview started. Top cam: ${topW}x${topH}, D405: ${d405W}x${d405H}`);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR camera: ${err.message}`);
-      }
-    }
-
-    async function setCameraMode() {
-      if (!cameraRunning) return;
-      try {
-        const source = selectedTeachCameraSource();
-        if (!source) return;
-        await api('/api/video/start', {source});
-        updateCameraFrame();
-      } catch (err) {
-        log(`ERROR camera: ${err.message}`);
-      }
-    }
-
-    async function startRecording() {
-      try {
-        const gravityData = await api('/api/gravity_compensation', gravityPayload());
-        log(gravityData.message);
-        const payload = {
-          fps: 30,
-          camera_mode: 'color',
-          session_name: document.getElementById('sourceSessionName').value.trim(),
-          high_smooth: true,
-          with_camera: false
-        };
-        const data = await api('/api/teach/start', payload);
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR record: ${err.message}`);
-      }
-    }
-
-    async function stopRecording() {
-      try {
-        const data = await api('/api/teach/stop', {});
-        log(data.message);
-        await loadRecordings(data.session_dir, null, data.session_dir);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR record: ${err.message}`);
-      }
-    }
-
-    async function startReplay() {
-      const select = document.getElementById('recordingSelect');
-      if (!select.value) {
-        log('ERROR replay: select a recording');
-        return;
-      }
-      try {
-        const data = await api('/api/replay/start', {
-          path: select.value,
-          speed: Number(document.getElementById('replaySpeed').value),
-          armed: document.getElementById('armed').checked
-        });
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR replay: ${err.message}`);
-      }
-    }
-
-    async function stopReplay() {
-      try {
-        const data = await api('/api/replay/stop', {});
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR replay: ${err.message}`);
-      }
-    }
-
-    function datasetCropConfig(role) {
-      const enabled = document.getElementById('datasetCropEnabled').checked;
-      const rawTarget = document.getElementById('datasetCropTarget').value;
-      const target = ['all', 'top', 'd405'].includes(rawTarget) ? rawTarget : 'all';
-      const applies = enabled && (target === 'all' || (target === 'top' && role === 'top_view') || (target === 'd405' && role !== 'top_view'));
-      if (!applies) return null;
-      return {
-        enabled: true,
-        aspect: document.getElementById('datasetCropAspect').value,
-        zoom: Number(document.getElementById('datasetCropZoom').value),
-        offset_x: Number(document.getElementById('datasetCropX').value),
-        offset_y: Number(document.getElementById('datasetCropY').value)
-      };
-    }
-
-    async function startDatasetCapture() {
-      const select = document.getElementById('recordingSelect');
-      if (!select.value) {
-        log('ERROR dataset: select a source movement');
-        return;
-      }
-      try {
-        const source = selectedTeachCameraSource();
-        if (!source) {
-          log('ERROR dataset: select a capture camera');
-          return;
-        }
-        const data = await api('/api/dataset_capture/start', {
-          path: select.value,
-          speed: Number(document.getElementById('replaySpeed').value),
-          camera_mode: 'color',
-          video_source: source,
-          capture_sources: [
-            cameraCaptureState.top_view ? {source, role: 'top_view', crop: datasetCropConfig('top_view')} : null,
-            cameraCaptureState.wrist_rgb ? {source: 'd405:color', role: 'wrist_rgb', crop: datasetCropConfig('wrist_rgb')} : null,
-            cameraCaptureState.wrist_depth ? {source: 'd405:depth', role: 'wrist_depth', crop: datasetCropConfig('wrist_depth')} : null
-          ].filter(Boolean),
-          task_name: document.getElementById('datasetTaskName').value.trim(),
-          armed: document.getElementById('armed').checked
-        });
-        log(data.message);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR dataset: ${err.message}`);
-      }
-    }
-
-    async function stopDatasetCapture() {
-      try {
-        const data = await api('/api/dataset_capture/stop', {});
-        log(data.message);
-        await loadRecordings(null, null, data.session_dir);
-        await refreshAll(false);
-      } catch (err) {
-        log(`ERROR dataset: ${err.message}`);
-      }
-    }
-
-    function reviewOptionLabel(rec) {
-      const label = rec.capture_type === 'dataset_replay' ? 'dataset' : 'source';
-      const task = rec.task_name ? ` · ${rec.task_name}` : '';
-      const camera = rec.video_source ? ` · ${rec.video_source}` : '';
-      const fps = formatFpsLabel(rec.actual_camera_fps, rec.nominal_camera_fps);
-      const fpsText = fps ? ` · ${fps}` : '';
-      const motorFps = formatFpsLabel(rec.actual_motor_fps, rec.nominal_motor_fps);
-      const motorFpsText = motorFps ? ` · motor ${motorFps}` : '';
-      return rec.mode === 'high_smooth'
-        ? `${rec.name} · ${label}${task}${camera}${fpsText}${motorFpsText} (${rec.motor_samples} motor / ${rec.samples} img)`
-        : `${rec.name} · ${label}${task}${fpsText}${motorFpsText} (${rec.samples} samples)`;
-    }
-
-    async function loadRecordings(preferredDir = null, nextAfterSource = null, preferredReviewDir = null) {
-      try {
-        const data = await api('/api/recordings');
-        const allRecordings = data.recordings || [];
-        reviewRecordings = allRecordings;
-        recordings = allRecordings.filter((rec) => rec.capture_type !== 'dataset_replay');
-        const select = document.getElementById('recordingSelect');
-        select.innerHTML = '';
-        const reviewSelect = document.getElementById('reviewRecordingSelect');
-        reviewSelect.innerHTML = '';
-        let selectedIndex = 0;
-        recordings.forEach((rec, i) => {
-          const opt = document.createElement('option');
-          opt.value = rec.path;
-          opt.textContent = reviewOptionLabel(rec).replace('dataset', 'source');
-          select.appendChild(opt);
-          if (preferredDir && rec.path === preferredDir) selectedIndex = i;
-        });
-        let reviewIndex = 0;
-        reviewRecordings.forEach((rec, i) => {
-          const opt = document.createElement('option');
-          opt.value = rec.path;
-          opt.textContent = reviewOptionLabel(rec);
-          reviewSelect.appendChild(opt);
-          if (preferredReviewDir && rec.path === preferredReviewDir) reviewIndex = i;
-        });
-        if (recordings.length === 0) {
-          select.value = '';
-        } else {
-          if (nextAfterSource) {
-            const sourceIndex = recordings.findIndex(rec => rec.path === nextAfterSource);
-            selectedIndex = sourceIndex >= 0 ? sourceIndex : 0;
-          } else if (!preferredDir) {
-            selectedIndex = 0;
-          }
-          select.selectedIndex = Math.min(selectedIndex, recordings.length - 1);
-        }
-        if (reviewRecordings.length === 0) {
-          stopReviewPlayback(false);
-          selectedRecording = null;
-          reviewFrames = [];
-          reviewSelect.value = '';
-          renderReviewEmpty('No recording yet.');
-          return;
-        }
-        if (!preferredReviewDir) {
-          const latestDatasetIndex = reviewRecordings.findIndex((rec) => rec.capture_type === 'dataset_replay');
-          reviewIndex = latestDatasetIndex >= 0 ? latestDatasetIndex : 0;
-        }
-        reviewSelect.selectedIndex = Math.min(reviewIndex, reviewRecordings.length - 1);
-        await loadReviewRecording();
-      } catch (err) {
-        log(`ERROR review: ${err.message}`);
-      }
-    }
-
-    async function loadSelectedRecording() {
-      const select = document.getElementById('recordingSelect');
-      if (!select.value) return;
-      const reviewSelect = document.getElementById('reviewRecordingSelect');
-      if (reviewSelect && reviewSelect.value !== select.value) {
-        reviewSelect.value = select.value;
-      }
-      await loadReviewRecording();
-    }
-
-    async function loadReviewRecording() {
-      const select = document.getElementById('reviewRecordingSelect');
-      if (!select.value) return;
-      try {
-        stopReviewPlayback(false);
-        const data = await api('/api/recording/load', {path: select.value});
-        selectedRecording = data;
-        reviewFrames = data.frames;
-        reviewIndex = 0;
-        const slider = document.getElementById('frameSlider');
-        slider.max = Math.max(0, reviewFrames.length - 1);
-        slider.value = 0;
-        showFrame(0);
-      } catch (err) {
-        log(`ERROR review: ${err.message}`);
-      }
-    }
-
-    function formatReviewTime(seconds) {
-      if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-      const minutes = Math.floor(seconds / 60);
-      const wholeSeconds = Math.floor(seconds % 60);
-      return `${minutes}:${String(wholeSeconds).padStart(2, '0')}`;
-    }
-
-    function formatFpsLabel(actual, nominal = null) {
-      const actualNumber = Number(actual);
-      const nominalNumber = Number(nominal);
-      if (!Number.isFinite(actualNumber) || actualNumber <= 0) {
-        return Number.isFinite(nominalNumber) && nominalNumber > 0 ? `${nominalNumber.toFixed(0)} FPS target` : '';
-      }
-      const actualText = actualNumber >= 10 ? actualNumber.toFixed(1) : actualNumber.toFixed(2);
-      if (Number.isFinite(nominalNumber) && nominalNumber > 0) {
-        return `${actualText}/${nominalNumber.toFixed(0)} FPS`;
-      }
-      return `${actualText} FPS`;
-    }
-
-    function frameTime(index) {
-      if (!reviewFrames.length) return 0;
-      const first = Number(reviewFrames[0].timestamp);
-      const current = Number(reviewFrames[Math.max(0, Math.min(index, reviewFrames.length - 1))].timestamp);
-      if (!Number.isFinite(first) || !Number.isFinite(current)) return index / 30;
-      return Math.max(0, current - first);
-    }
-
-    function recordingDuration() {
-      if (reviewFrames.length < 2) return 0;
-      return frameTime(reviewFrames.length - 1);
-    }
-
-    function updateReviewPlaybackState() {
-      const state = document.getElementById('reviewPlaybackState');
-      const current = formatReviewTime(frameTime(reviewIndex));
-      const total = formatReviewTime(recordingDuration());
-      state.textContent = `${current} / ${total} · frame ${reviewFrames.length ? reviewIndex + 1 : 0}/${reviewFrames.length}`;
-    }
-
-    function toggleReviewPlayback() {
-      if (reviewPlaying) {
-        stopReviewPlayback(false);
-        return;
-      }
-      startReviewPlayback();
-    }
-
-    function startReviewPlayback() {
-      if (!selectedRecording || reviewFrames.length === 0) {
-        log('ERROR review: no recording to play');
-        return;
-      }
-      if (reviewIndex >= reviewFrames.length - 1) showFrame(0);
-      reviewPlaying = true;
-      document.getElementById('reviewPlayButton').textContent = 'Pause';
-      scheduleNextReviewFrame();
-    }
-
-    function stopReviewPlayback(reset) {
-      if (reviewPlaybackTimer) {
-        clearTimeout(reviewPlaybackTimer);
-        reviewPlaybackTimer = null;
-      }
-      reviewPlaying = false;
-      const button = document.getElementById('reviewPlayButton');
-      if (button) button.textContent = 'Play';
-      if (reset && reviewFrames.length) showFrame(0);
-      else updateReviewPlaybackState();
-    }
-
-    function scheduleNextReviewFrame() {
-      if (!reviewPlaying) return;
-      if (reviewIndex >= reviewFrames.length - 1) {
-        stopReviewPlayback(false);
-        return;
-      }
-      const current = Number(reviewFrames[reviewIndex].timestamp);
-      const next = Number(reviewFrames[reviewIndex + 1].timestamp);
-      let delayMs = Number.isFinite(current) && Number.isFinite(next)
-        ? (next - current) * 1000
-        : 33;
-      if (!Number.isFinite(delayMs) || delayMs <= 0) delayMs = 33;
-      delayMs = Math.max(15, Math.min(delayMs, 250));
-      reviewPlaybackTimer = setTimeout(() => {
-        showFrame(reviewIndex + 1);
-        scheduleNextReviewFrame();
-      }, delayMs);
-    }
-
-    function showFrame(index) {
-      if (!selectedRecording || reviewFrames.length === 0) {
-        renderReviewEmpty('No frame');
-        return;
-      }
-      reviewIndex = Math.max(0, Math.min(index, reviewFrames.length - 1));
-      const frame = reviewFrames[reviewIndex];
-      const topImg = document.getElementById('reviewImageTop');
-      const topPlaceholder = document.getElementById('reviewPlaceholderTop');
-      const wristRgbImg = document.getElementById('reviewImageWristRgb');
-      const wristRgbPlaceholder = document.getElementById('reviewPlaceholderWristRgb');
-      const wristDepthImg = document.getElementById('reviewImageWristDepth');
-      const wristDepthPlaceholder = document.getElementById('reviewPlaceholderWristDepth');
-      const images = frame.images || {};
-      const topImage = images.top_view || frame.image;
-      const wristRgbImage = images.wrist_rgb || null;
-      const wristDepthImage = images.wrist_depth || null;
-      if (topImage) {
-        topImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(topImage)}&t=${Date.now()}`;
-        topImg.style.display = 'block';
-        topPlaceholder.style.display = 'none';
-      } else {
-        topImg.style.display = 'none';
-        topPlaceholder.style.display = 'block';
-        topPlaceholder.textContent = 'No top-view image';
-      }
-      if (wristRgbImage) {
-        wristRgbImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(wristRgbImage)}&t=${Date.now()}`;
-        wristRgbImg.style.display = 'block';
-        wristRgbPlaceholder.style.display = 'none';
-      } else {
-        wristRgbImg.style.display = 'none';
-        wristRgbPlaceholder.style.display = 'block';
-        wristRgbPlaceholder.textContent = 'No wrist-RGB image';
-      }
-      if (wristDepthImage) {
-        wristDepthImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(wristDepthImage)}&t=${Date.now()}`;
-        wristDepthImg.style.display = 'block';
-        wristDepthPlaceholder.style.display = 'none';
-      } else {
-        wristDepthImg.style.display = 'none';
-        wristDepthPlaceholder.style.display = 'block';
-        wristDepthPlaceholder.textContent = 'No wrist-depth image';
-      }
-      document.getElementById('frameSlider').value = reviewIndex;
-      const gripperText = frame.gripper_position == null
-        ? 'gripper n/a'
-        : `gripper ${Number(frame.gripper_position).toFixed(4)} m`;
-      const syncText = frame.motor_index == null
-        ? 'sync n/a'
-        : `sync motor ${frame.motor_index}`;
-      const metadata = selectedRecording.metadata || {};
-      const taskText = metadata.task_name ? ` · task ${metadata.task_name}` : '';
-      const cameraText = metadata.video_source ? ` · camera ${metadata.video_source}` : '';
-      const fpsText = formatFpsLabel(selectedRecording.actual_camera_fps, selectedRecording.nominal_camera_fps);
-      const fpsMeta = fpsText ? ` · camera ${fpsText}` : '';
-      const motorFpsText = formatFpsLabel(selectedRecording.actual_motor_fps, selectedRecording.nominal_motor_fps);
-      const motorFpsMeta = motorFpsText ? ` · motor ${motorFpsText}` : '';
-      document.getElementById('reviewMeta').textContent =
-        `${selectedRecording.name}${taskText}${cameraText}${fpsMeta}${motorFpsMeta} · frame ${reviewIndex + 1}/${reviewFrames.length} · ${syncText} · ${gripperText} · qpos ${frame.qpos.map(v => Number(v).toFixed(2)).join(', ')}`;
-      updateReviewPlaybackState();
-    }
-
-    function renderReviewEmpty(message) {
-      stopReviewPlayback(false);
-      document.getElementById('reviewImageTop').style.display = 'none';
-      document.getElementById('reviewPlaceholderTop').style.display = 'block';
-      document.getElementById('reviewPlaceholderTop').textContent = message;
-      document.getElementById('reviewImageWristRgb').style.display = 'none';
-      document.getElementById('reviewPlaceholderWristRgb').style.display = 'block';
-      document.getElementById('reviewPlaceholderWristRgb').textContent = message;
-      document.getElementById('reviewImageWristDepth').style.display = 'none';
-      document.getElementById('reviewPlaceholderWristDepth').style.display = 'block';
-      document.getElementById('reviewPlaceholderWristDepth').textContent = message;
-      document.getElementById('reviewMeta').textContent = '';
-      updateReviewPlaybackState();
-    }
-
-    function stepFrame(delta) {
-      stopReviewPlayback(false);
-      showFrame(reviewIndex + delta);
-    }
-
-    async function nextSourceRecording() {
-      const select = document.getElementById('recordingSelect');
-      if (select.options.length === 0) return;
-      select.selectedIndex = Math.min(select.selectedIndex + 1, select.options.length - 1);
-      await loadSelectedRecording();
-    }
-
-    async function previousSourceRecording() {
-      const select = document.getElementById('recordingSelect');
-      if (select.options.length === 0) return;
-      select.selectedIndex = Math.max(select.selectedIndex - 1, 0);
-      await loadSelectedRecording();
-    }
-
-    async function nextRecording() {
-      const select = document.getElementById('reviewRecordingSelect');
-      if (select.options.length === 0) return;
-      select.selectedIndex = Math.min(select.selectedIndex + 1, select.options.length - 1);
-      await loadReviewRecording();
-    }
-
-    async function previousRecording() {
-      const select = document.getElementById('reviewRecordingSelect');
-      if (select.options.length === 0) return;
-      select.selectedIndex = Math.max(select.selectedIndex - 1, 0);
-      await loadReviewRecording();
-    }
-
-    async function deleteRecording() {
-      const select = document.getElementById('reviewRecordingSelect');
-      if (!select.value) return;
-      if (!confirm('Delete this recording?')) return;
-      try {
-        const nextIndex = Math.max(0, select.selectedIndex - 1);
-        const data = await api('/api/recording/delete', {path: select.value});
-        log(data.message);
-        selectedRecording = null;
-        reviewFrames = [];
-        renderReviewEmpty('Recording deleted');
-        await loadRecordings();
-        const refreshed = document.getElementById('reviewRecordingSelect');
-        if (refreshed.options.length > 0) {
-          refreshed.selectedIndex = Math.min(nextIndex, refreshed.options.length - 1);
-          await loadReviewRecording();
-        }
-      } catch (err) {
-        log(`ERROR review: ${err.message}`);
-      }
-    }
-
-    async function clearRecordings() {
-      if (!confirm('Delete all recordings?')) return;
-      try {
-        const data = await api('/api/recordings/clear', {});
-        log(data.message);
-        selectedRecording = null;
-        reviewFrames = [];
-        const select = document.getElementById('recordingSelect');
-        select.innerHTML = '';
-        renderReviewEmpty('No recording');
-        await loadRecordings();
-      } catch (err) {
-        log(`ERROR review: ${err.message}`);
-      }
-    }
-
-    refreshAll();
-    loadRecordings();
-    setInterval(() => refreshAll(false), 1500);
-  </script>
-</body>
-</html>
-"""
+HAMSTER_HTML = (Path(__file__).resolve().parent / "pages" / "hamster.html").read_text(encoding="utf-8")
 
 
 class CameraController:
@@ -3180,6 +80,8 @@ class CameraController:
         self.usb_capture: Any | None = None
         self.usb_index: int | None = None
         self.usb_label: str | None = None
+        self.usb_captures: dict[int, Any] = {}
+        self.usb_labels: dict[int, str] = {}
         self.usb_last_message = "USB camera ready"
 
     @staticmethod
@@ -3350,11 +252,11 @@ class CameraController:
         self._require_deps()
         cameras: list[dict[str, Any]] = []
         for index in self._video_device_indices():
-            if self.usb_capture is not None and self.usb_index == index and self.usb_label:
+            if index in self.usb_captures and self.usb_labels.get(index):
                 cameras.append(
                     {
                         "index": index,
-                        "label": self.usb_label,
+                        "label": self.usb_labels[index],
                         "device": f"/dev/video{index}",
                     }
                 )
@@ -3364,6 +266,10 @@ class CameraController:
                 continue
             if self._is_builtin_laptop_camera_label(label):
                 continue
+            capture = self._probe_usb_capture(index)
+            if capture is None:
+                continue
+            capture.release()
             cameras.append(
                 {
                     "index": index,
@@ -3451,10 +357,11 @@ class CameraController:
             return {
                 "ok": True,
                 "cameras": cameras,
-                "running": self.usb_capture is not None,
+                "running": bool(self.usb_captures),
                 "active_index": self.usb_index,
                 "active_label": self.usb_label,
                 "active_device": f"/dev/video{self.usb_index}" if self.usb_index is not None else "",
+                "active_indices": sorted(self.usb_captures),
                 "message": message,
             }
 
@@ -3466,7 +373,7 @@ class CameraController:
             active_detail = ""
             if self.pipeline is not None:
                 active_source = f"d405:{self.mode}"
-            elif self.usb_capture is not None and self.usb_index is not None:
+            elif self.usb_captures and self.usb_index is not None:
                 active_source = f"usb:{self.usb_index}"
             for source in sources:
                 if source["id"] == active_source:
@@ -3538,17 +445,18 @@ class CameraController:
             label = self._usb_device_label(index)
             if not label:
                 raise RuntimeError("Selected camera is reserved for RealSense and not shown here.")
-            if self.usb_capture is not None and self.usb_index == index:
+            if index in self.usb_captures:
                 self.usb_last_message = f"USB camera already running: {label}"
+                self.usb_index = index
+                self.usb_label = label
                 return self.usb_status_unlocked(self.usb_last_message)
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
             capture = self._probe_usb_capture(f"/dev/video{index}", width, height)
             if capture is None:
                 raise RuntimeError(
                     f"Unable to open /dev/video{index}. Another app may own it, or this node is not a capture stream."
                 )
+            self.usb_captures[index] = capture
+            self.usb_labels[index] = label
             self.usb_capture = capture
             self.usb_index = index
             self.usb_label = label
@@ -3557,9 +465,11 @@ class CameraController:
 
     def usb_stop(self) -> dict[str, Any]:
         with self.lock:
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
+            for capture in self.usb_captures.values():
+                capture.release()
+            self.usb_captures.clear()
+            self.usb_labels.clear()
+            self.usb_capture = None
             self.usb_index = None
             self.usb_label = None
             self.usb_last_message = "USB camera stopped"
@@ -3570,11 +480,6 @@ class CameraController:
         width = int(payload.get("width", 640))
         height = int(payload.get("height", 480))
         if kind == "d405":
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
-                self.usb_index = None
-                self.usb_label = None
             self.start({"mode": value, "width": width, "height": height})
         else:
             if self.pipeline is not None:
@@ -3589,12 +494,14 @@ class CameraController:
                 self.pipeline.stop()
                 self.pipeline = None
                 self.last_message = "Camera preview stopped"
-            if self.usb_capture is not None:
-                self.usb_capture.release()
-                self.usb_capture = None
-                self.usb_index = None
-                self.usb_label = None
-                self.usb_last_message = "Camera preview stopped"
+            for capture in self.usb_captures.values():
+                capture.release()
+            self.usb_captures.clear()
+            self.usb_labels.clear()
+            self.usb_capture = None
+            self.usb_index = None
+            self.usb_label = None
+            self.usb_last_message = "Camera preview stopped"
         return self.video_status()
 
     def set_mode(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3616,16 +523,17 @@ class CameraController:
 
     def usb_status_unlocked(self, message: str) -> dict[str, Any]:
         cameras = self._usb_cameras_unlocked()
-        if self.usb_index is not None and not any(camera["index"] == self.usb_index for camera in cameras):
+        if self.usb_index is not None and self.usb_index not in self.usb_captures and not any(camera["index"] == self.usb_index for camera in cameras):
             self.usb_index = None
             self.usb_label = None
         return {
             "ok": True,
             "cameras": cameras,
-            "running": self.usb_capture is not None,
+            "running": bool(self.usb_captures),
             "active_index": self.usb_index,
             "active_label": self.usb_label,
             "active_device": f"/dev/video{self.usb_index}" if self.usb_index is not None else "",
+            "active_indices": sorted(self.usb_captures),
             "message": message,
         }
 
@@ -3659,9 +567,10 @@ class CameraController:
         index = self._validate_usb_index(raw_index)
         with self.lock:
             self._require_deps()
-            if self.usb_capture is None or self.usb_index != index:
+            capture = self.usb_captures.get(index)
+            if capture is None:
                 raise RuntimeError("USB camera preview is not running for the selected device.")
-            ok, frame = self.usb_capture.read()
+            ok, frame = capture.read()
             if not ok or frame is None:
                 raise RuntimeError(f"No frame received from USB camera {index}.")
             frame = self._apply_crop(frame, crop)
@@ -3792,6 +701,9 @@ class TeachRecorder:
                 "capture_type": str(payload.get("capture_type", "manual")),
                 "source_recording": payload.get("source_recording"),
                 "task_name": str(payload.get("task_name", "")).strip() or None,
+                "dataset_profile": str(payload.get("dataset_profile", "")).strip() or None,
+                "action_offset": int(payload.get("action_offset", 1)),
+                "lerobot_features": payload.get("lerobot_features"),
                 "robot_ip": self.arm.args.ip,
                 "variant": self.arm.args.variant,
                 "mode": "high_smooth" if high_smooth else "standard",
@@ -5064,6 +1976,9 @@ class DatasetCaptureRunner:
             "capture_type": "dataset_replay",
             "source_recording": raw_path,
             "task_name": payload.get("task_name"),
+            "dataset_profile": payload.get("dataset_profile"),
+            "action_offset": payload.get("action_offset", 1),
+            "lerobot_features": payload.get("lerobot_features"),
         }
         replay_payload = {
             "path": raw_path,
@@ -5229,6 +2144,15 @@ class ModelTestRunner:
         return value
 
     @staticmethod
+    def _float_value(payload: dict[str, Any], name: str, default: float, low: float | None = None) -> float:
+        value = float(payload.get(name, default))
+        if not math.isfinite(value):
+            raise RuntimeError(f"{name} must be a finite number.")
+        if low is not None and value < low:
+            raise RuntimeError(f"{name} must be >= {low}.")
+        return value
+
+    @staticmethod
     def _bounded_int(payload: dict[str, Any], name: str, default: int, low: int, high: int) -> int:
         value = int(payload.get(name, default))
         if not low <= value <= high:
@@ -5255,17 +2179,31 @@ class ModelTestRunner:
                 RequestHandler.camera_controller.stop()
 
         checkpoint = str(payload.get("checkpoint") or "widowx_ai/models/act_20260428_084937/best.pt")
-        steps = self._bounded_int(payload, "steps", 1, 1, 50)
-        period = self._bounded_float(payload, "period", 1.0, 0.5, 5.0)
-        max_speed = self._bounded_float(payload, "max_speed", 0.05, 0.02, 0.20)
-        max_step_rad = self._bounded_float(payload, "max_step_rad", 0.035, 0.005, 0.10)
-        envelope_margin = self._bounded_float(payload, "envelope_margin", 0.08, 0.0, 0.20)
+        primary_camera_source = str(payload.get("primary_camera_source") or "").strip()
+        cameras = RequestHandler.camera_controller.usb_status().get("cameras", [])
+        valid_usb_sources = {f"usb:{camera['index']}" for camera in cameras}
+        if primary_camera_source.startswith("usb:") and primary_camera_source not in valid_usb_sources:
+            primary_camera_source = next(iter(sorted(valid_usb_sources)), "")
+        steps = self._bounded_int(payload, "steps", 1, 1, 150)
+        period = self._float_value(payload, "period", 1.0, 0.0)
+        command_move_time = self._float_value(payload, "command_move_time", 0.5, 0.0)
+        movement_speed = self._bounded_float(payload, "movement_speed", 100.0, 50.0, 100.0)
+        wait_after_command = self._float_value(payload, "wait_after_command", 0.5, 0.0)
+        speed_scale = movement_speed / 100.0
+        effective_step_time = wait_after_command
+        if speed_scale < 0.999 and effective_step_time <= 0:
+            base_step_time = command_move_time if command_move_time > 0 else period
+            effective_step_time = max(0.0, (base_step_time / speed_scale) - base_step_time)
+        max_speed = self._float_value(payload, "max_speed", 0.05, 1e-6)
+        max_step_rad = self._bounded_float(payload, "max_step_rad", 0.20, 0.005, 1.00)
+        envelope_margin = self._bounded_float(payload, "envelope_margin", 3.14, 0.0, 3.14)
         collision_action = str(payload.get("collision_action") or "gravity")
         if collision_action not in {"idle", "gravity"}:
             raise RuntimeError("collision_action must be 'idle' or 'gravity'.")
-        stall_error_rad = self._bounded_float(payload, "stall_error_rad", 0.045, 0.015, 0.12)
-        stall_velocity_rad_s = self._bounded_float(payload, "stall_velocity_rad_s", 0.008, 0.001, 0.05)
-        stall_seconds = self._bounded_float(payload, "stall_seconds", 0.35, 0.1, 2.0)
+        software_safety = bool(payload.get("software_safety", False))
+        stall_error_rad = self._bounded_float(payload, "stall_error_rad", 3.14, 0.015, 3.14)
+        stall_velocity_rad_s = self._bounded_float(payload, "stall_velocity_rad_s", 0.0, 0.0, 1.00)
+        stall_seconds = self._bounded_float(payload, "stall_seconds", 60.0, 0.1, 60.0)
 
         command = [
             str(self.python),
@@ -5277,6 +2215,12 @@ class ModelTestRunner:
             str(steps),
             "--period",
             str(period),
+            "--command-move-time",
+            str(command_move_time),
+            "--movement-speed-scale",
+            str(speed_scale),
+            "--wait-after-command",
+            str(wait_after_command),
             "--max-speed",
             str(max_speed),
             "--max-step-rad",
@@ -5300,8 +2244,13 @@ class ModelTestRunner:
             "--timeout",
             str(self.controller.args.timeout),
             "--max-runtime",
-            str(max(10.0, steps * period + 10.0)),
+            str(max(10.0, steps * max(effective_step_time, 0.05) + 10.0)),
         ]
+        if not software_safety:
+            command.append("--disable-software-safety")
+        if primary_camera_source:
+            command.extend(["--primary-camera-source", primary_camera_source])
+        
         if real:
             command.extend(["--real", "--armed"])
 
@@ -5365,6 +2314,365 @@ class ModelTestRunner:
         return f"Model test emergency stop requested (PID {pid})."
 
 
+class ActDatasetPlanner:
+    def __init__(self, project_root: Path, recordings: RecordingLibrary) -> None:
+        self.project_root = project_root
+        self.recordings = recordings
+
+    @staticmethod
+    def _safe_name(raw_name: Any, default: str) -> str:
+        name = str(raw_name or default).strip()
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        cleaned = "".join(ch if ch in allowed else "_" for ch in name)
+        return cleaned or default
+
+    @staticmethod
+    def _positive_int(payload: dict[str, Any], name: str, default: int, low: int, high: int) -> int:
+        value = int(payload.get(name) or default)
+        if not low <= value <= high:
+            raise RuntimeError(f"{name} must be between {low} and {high}.")
+        return value
+
+    @staticmethod
+    def _camera_list(raw_cameras: Any) -> list[str]:
+        cameras = [item.strip() for item in str(raw_cameras or "top_view,wrist_rgb").split(",") if item.strip()]
+        allowed = {"top_view", "front", "wrist_rgb", "wrist_depth"}
+        unknown = [camera for camera in cameras if camera not in allowed]
+        if unknown:
+            raise RuntimeError(f"Unknown ACT camera(s): {', '.join(unknown)}.")
+        if not cameras:
+            raise RuntimeError("Select at least one ACT camera.")
+        return cameras
+
+    @staticmethod
+    def _quote_args(args: list[str]) -> str:
+        return " ".join(shlex.quote(str(arg)) for arg in args)
+
+    @staticmethod
+    def _is_relative_to(path: Path, base: Path) -> bool:
+        try:
+            path.relative_to(base)
+        except ValueError:
+            return False
+        return True
+
+    def _default_output_root(self, dataset_name: str) -> Path:
+        return Path("/tmp") / "lerobot_datasets" / dataset_name
+
+    def _safe_output_root(self, raw_root: Any, dataset_name: str) -> Path:
+        raw = str(raw_root or "").strip()
+        root = Path(raw).expanduser() if raw else self._default_output_root(dataset_name)
+        if not root.is_absolute():
+            root = self.project_root / root
+        resolved = root.resolve()
+        project_root = self.project_root.resolve()
+        tmp_root = Path("/tmp").resolve()
+        forbidden = {Path("/").resolve(), tmp_root, project_root, project_root.parent.resolve()}
+        if resolved in forbidden:
+            raise RuntimeError(f"Refusing unsafe LeRobot output root: {resolved}")
+        if not (self._is_relative_to(resolved, tmp_root) or self._is_relative_to(resolved, project_root)):
+            raise RuntimeError("LeRobot output root must be under /tmp or this project folder.")
+        return resolved
+
+    def plan(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        dataset_name = self._safe_name(payload.get("dataset_name"), "widowx_push_cube_full")
+        repo_id = str(payload.get("repo_id") or "matteo/widowx-push-cube-local").strip()
+        if "/" not in repo_id:
+            raise RuntimeError("repo_id should look like hf_user/dataset_name.")
+        cameras = self._camera_list(payload.get("cameras"))
+        steps = self._positive_int(payload, "steps", 10000, 200, 500000)
+        batch_size = self._positive_int(payload, "batch_size", 8, 1, 256)
+        max_episodes = payload.get("max_episodes")
+        max_episode_count = int(max_episodes) if max_episodes not in {None, "", 0} else None
+        if max_episode_count is not None and max_episode_count < 1:
+            raise RuntimeError("max_episodes must be empty or greater than 0.")
+        output_root = self._safe_output_root(payload.get("output_root"), dataset_name)
+        use_videos = bool(payload.get("use_videos"))
+        overwrite = bool(payload.get("overwrite", True))
+
+        recordings = self.recordings.list()["recordings"]
+        dataset_recordings = [
+            item for item in recordings if item.get("capture_type") == "dataset_replay"
+        ]
+        selected_recordings = dataset_recordings[:max_episode_count] if max_episode_count else dataset_recordings
+
+        total_frames = sum(int(item.get("samples") or 0) for item in selected_recordings)
+        tasks = sorted({str(item.get("task_name")) for item in selected_recordings if item.get("task_name")})
+        available_cameras: set[str] = set()
+        missing_camera_sessions = 0
+        for item in selected_recordings:
+            roles = {
+                str(entry.get("role"))
+                for entry in item.get("capture_sources", [])
+                if isinstance(entry, dict) and entry.get("role")
+            }
+            available_cameras.update(roles)
+            if any(camera not in roles for camera in cameras):
+                missing_camera_sessions += 1
+
+        warnings = []
+        if len(selected_recordings) < 50:
+            warnings.append("ACT is data efficient, but the LeRobot docs recommend starting near 50 demonstrations when possible.")
+        if total_frames < 500:
+            warnings.append("Very few camera frames detected; record more replay+cameras episodes before a full train.")
+        if not tasks:
+            warnings.append("No task labels found; set a stable task label before dataset capture.")
+        if missing_camera_sessions:
+            warnings.append(f"{missing_camera_sessions} selected episode(s) do not contain all requested ACT cameras.")
+
+        dataset_root = output_root
+        output_dir = self.project_root / "outputs" / "train" / f"act_{dataset_name}"
+        job_name = f"act_{dataset_name}"
+        lerobot_python = self.project_root / "Lerobot" / ".venv-lerobot" / "bin" / "python"
+
+        convert_command = [
+            str(lerobot_python),
+            "scripts/convert_widowx_to_lerobot.py",
+            "--source-root",
+            "widowx_ai/recordings",
+            "--output-root",
+            str(dataset_root),
+            "--repo-id",
+            repo_id,
+            "--robot-type",
+            "widowx_ai",
+            "--fps",
+            "30",
+            "--cameras",
+            ",".join(cameras),
+            "--action-offset",
+            "1",
+            "--use-videos" if use_videos else "--no-use-videos",
+        ]
+        if overwrite:
+            convert_command.append("--overwrite")
+        if max_episode_count:
+            convert_command.extend(["--max-episodes", str(max_episode_count)])
+
+        train_command = [
+            "lerobot-train",
+            f"--dataset.repo_id={repo_id}",
+            f"--dataset.root={dataset_root}",
+            "--policy.type=act",
+            f"--output_dir={output_dir}",
+            f"--job_name={job_name}",
+            "--policy.device=cuda",
+            "--wandb.enable=false",
+            "--policy.push_to_hub=false",
+            f"--steps={steps}",
+            f"--batch_size={batch_size}",
+            "--save_freq=1000",
+        ]
+
+        slurm_command = "sbatch slurm/convert_widowx_lerobot_full.slurm && sbatch slurm/lerobot_act_train_full.slurm"
+        return {
+            "ok": True,
+            "dataset": {
+                "episodes": len(selected_recordings),
+                "available_episodes": len(dataset_recordings),
+                "frames": total_frames,
+                "tasks": len(tasks),
+                "task_names": tasks,
+                "available_cameras": sorted(available_cameras),
+                "requested_cameras": cameras,
+                "ready": not warnings,
+                "warnings": warnings,
+                "output_root": str(dataset_root),
+                "media_storage": "videos" if use_videos else "images",
+            },
+            "commands": {
+                "convert": self._quote_args(convert_command),
+                "train": self._quote_args(train_command),
+                "slurm": slurm_command,
+            },
+            "notes": [
+                "ACT takes RGB images and robot state as observations, then predicts future action chunks.",
+                "The converter uses observation.state, observation.images.<camera>, and action features for LeRobot.",
+            ],
+        }
+
+
+class LeRobotExportRunner:
+    def __init__(self, project_root: Path, planner: ActDatasetPlanner) -> None:
+        self.project_root = project_root
+        self.planner = planner
+        self.lock = threading.Lock()
+        self.process: subprocess.Popen[str] | None = None
+        self.output: deque[str] = deque(maxlen=400)
+        self.command: list[str] = []
+        self.output_root: str | None = None
+        self.returncode: int | None = None
+        self.last_message = "LeRobot export ready."
+
+    def _is_running_unlocked(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            if self.process is not None and self.process.poll() is not None:
+                self.returncode = self.process.returncode
+            return self._status_unlocked(self.last_message)
+
+    def _status_unlocked(self, message: str) -> dict[str, Any]:
+        running = self._is_running_unlocked()
+        return {
+            "ok": True,
+            "running": running,
+            "pid": self.process.pid if running and self.process is not None else None,
+            "returncode": self.returncode,
+            "command": ActDatasetPlanner._quote_args(self.command) if self.command else "",
+            "output_root": self.output_root,
+            "output": "\n".join(self.output),
+            "message": message,
+        }
+
+    def start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        plan = self.planner.plan(payload)
+        if int(plan["dataset"]["episodes"]) < 1:
+            raise RuntimeError("No dataset capture episodes found. Run 'Replay movement + record camera' first.")
+        command = shlex.split(plan["commands"]["convert"])
+        python_path = Path(command[0])
+        converter_path = self.project_root / "scripts" / "convert_widowx_to_lerobot.py"
+        if not python_path.exists():
+            raise RuntimeError(f"LeRobot Python environment not found: {python_path}")
+        if not converter_path.exists():
+            raise RuntimeError(f"LeRobot converter not found: {converter_path}")
+        env = os.environ.copy()
+        env.setdefault("HF_HOME", "/tmp/lerobot_hf_cache")
+        env.setdefault("HF_DATASETS_CACHE", "/tmp/lerobot_hf_cache/datasets")
+        env["PYTHONUNBUFFERED"] = "1"
+        with self.lock:
+            if self._is_running_unlocked():
+                return self._status_unlocked("LeRobot export is already running.")
+            self.command = command
+            self.output_root = str(plan["dataset"]["output_root"])
+            self.returncode = None
+            self.output.clear()
+            self.process = subprocess.Popen(
+                command,
+                cwd=str(self.project_root),
+                env=env,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            process = self.process
+            self.last_message = f"LeRobot export started (PID {process.pid})."
+            threading.Thread(target=self._watch, args=(process,), daemon=True).start()
+            return self._status_unlocked(self.last_message)
+
+    def _watch(self, process: subprocess.Popen[str]) -> None:
+        assert process.stdout is not None
+        for line in process.stdout:
+            with self.lock:
+                self.output.append(line.rstrip())
+        returncode = process.wait()
+        with self.lock:
+            self.returncode = returncode
+            if self.process is process:
+                self.last_message = (
+                    f"LeRobot export complete: {self.output_root}"
+                    if returncode == 0
+                    else f"LeRobot export failed with code {returncode}."
+                )
+
+
+class ActReviewRunner:
+    def __init__(self, project_root: Path, planner: ActDatasetPlanner) -> None:
+        self.project_root = project_root
+        self.planner = planner
+        self.python = project_root / "Lerobot" / ".venv-lerobot" / "bin" / "python"
+        self.script = project_root / "scripts" / "lerobot_act_test_interface.py"
+        self.default_checkpoint = project_root / "widowx_ai" / "models" / "checkpoint_last"
+        self.lock = threading.Lock()
+        self.process: subprocess.Popen[str] | None = None
+        self.command: list[str] = []
+        self.last_message = "ACT review ready."
+        self.url = "http://127.0.0.1:7866"
+
+    def _is_running_unlocked(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def status(self) -> dict[str, Any]:
+        with self.lock:
+            if self.process is not None and self.process.poll() is not None:
+                self.process = None
+            return self._status_unlocked(self.last_message)
+
+    def _status_unlocked(self, message: str) -> dict[str, Any]:
+        running = self._is_running_unlocked()
+        return {
+            "ok": True,
+            "running": running,
+            "pid": self.process.pid if running and self.process is not None else None,
+            "url": self.url,
+            "command": ActDatasetPlanner._quote_args(self.command) if self.command else "",
+            "message": message,
+        }
+
+    def start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.python.exists():
+            raise RuntimeError(f"LeRobot Python environment not found: {self.python}")
+        if not self.script.exists():
+            raise RuntimeError(f"ACT review script not found: {self.script}")
+        checkpoint = Path(str(payload.get("checkpoint") or self.default_checkpoint)).expanduser()
+        if not checkpoint.is_absolute():
+            checkpoint = self.project_root / checkpoint
+        checkpoint = checkpoint.resolve()
+        if not checkpoint.exists():
+            raise RuntimeError(f"ACT checkpoint not found: {checkpoint}")
+        plan = self.planner.plan(payload)
+        dataset_root = Path(str(plan["dataset"]["output_root"])).resolve()
+        if not dataset_root.exists():
+            fallback = Path("/tmp/widowx_push_tape_front_lerobot")
+            if fallback.exists():
+                dataset_root = fallback
+            else:
+                raise RuntimeError(
+                    f"LeRobot dataset not found: {dataset_root}. Export LeRobotDataset first."
+                )
+        repo_id = str(payload.get("repo_id") or "local/widowx-push-tape-front")
+        command = [
+            str(self.python),
+            str(self.script),
+            "--dataset-root",
+            str(dataset_root),
+            "--repo-id",
+            repo_id,
+            "--checkpoint",
+            str(checkpoint),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "7866",
+            "--device",
+            "cpu",
+        ]
+        env = os.environ.copy()
+        env.setdefault("HF_HOME", "/tmp/lerobot_hf_cache")
+        env.setdefault("HF_DATASETS_CACHE", "/tmp/lerobot_hf_cache/datasets")
+        env["PYTHONUNBUFFERED"] = "1"
+        with self.lock:
+            if self._is_running_unlocked():
+                return self._status_unlocked("ACT review is already running.")
+            self.command = command
+            self.process = subprocess.Popen(
+                command,
+                cwd=str(self.project_root),
+                env=env,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.last_message = f"ACT review started at {self.url} (PID {self.process.pid})."
+            return self._status_unlocked(self.last_message)
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     controller: ArmController
     camera_controller: CameraController
@@ -5374,6 +2682,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     dataset_capture_runner: DatasetCaptureRunner
     trossen_ui_runner: TrossenDataCollectionUIRunner
     model_test_runner: ModelTestRunner
+    act_dataset_planner: ActDatasetPlanner
+    lerobot_export_runner: LeRobotExportRunner
+    act_review_runner: ActReviewRunner
+    hamster_service: HamsterService
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}")
@@ -5433,6 +2745,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(MODEL_TEST_HTML.encode("utf-8"))
             return
+        if parsed.path == "/hamster":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(HAMSTER_HTML.encode("utf-8"))
+            return
         if parsed.path == "/api/status":
             self.send_json(self.controller.status())
             return
@@ -5459,6 +2777,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/recordings":
             self.send_json(self.recording_library.list())
+            return
+        if parsed.path == "/api/act_dataset/plan":
+            self.send_json(self.act_dataset_planner.plan())
+            return
+        if parsed.path == "/api/lerobot_export/status":
+            self.send_json(self.lerobot_export_runner.status())
+            return
+        if parsed.path == "/api/act_review/status":
+            self.send_json(self.act_review_runner.status())
             return
         if parsed.path == "/api/camera/frame":
             try:
@@ -5560,6 +2887,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "/api/trossen_ui/start": self.trossen_ui_runner.start,
                 "/api/trossen_ui/stop": self.trossen_ui_runner.stop,
                 "/api/model_test/run": lambda: self.model_test_runner.run(payload),
+                "/api/act_dataset/plan": lambda: self.act_dataset_planner.plan(payload),
+                "/api/lerobot_export/start": lambda: self.lerobot_export_runner.start(payload),
+                "/api/act_review/start": lambda: self.act_review_runner.start(payload),
+                "/api/hamster/send_camera": lambda: self.hamster_service.send_camera(payload),
                 "/api/recording/load": lambda: self.recording_library.load(payload),
                 "/api/recording/delete": lambda: self.recording_library.delete(payload),
                 "/api/recordings/clear": self.recording_library.clear,
@@ -5627,6 +2958,10 @@ def main() -> int:
     dataset_capture_runner = DatasetCaptureRunner(teach_recorder, replay_runner)
     trossen_ui_runner = TrossenDataCollectionUIRunner(project_root)
     model_test_runner = ModelTestRunner(project_root, controller)
+    act_dataset_planner = ActDatasetPlanner(project_root, recording_library)
+    lerobot_export_runner = LeRobotExportRunner(project_root, act_dataset_planner)
+    act_review_runner = ActReviewRunner(project_root, act_dataset_planner)
+    hamster_service = HamsterService(camera_controller)
     RequestHandler.controller = controller
     RequestHandler.camera_controller = camera_controller
     RequestHandler.teach_recorder = teach_recorder
@@ -5635,6 +2970,10 @@ def main() -> int:
     RequestHandler.dataset_capture_runner = dataset_capture_runner
     RequestHandler.trossen_ui_runner = trossen_ui_runner
     RequestHandler.model_test_runner = model_test_runner
+    RequestHandler.act_dataset_planner = act_dataset_planner
+    RequestHandler.lerobot_export_runner = lerobot_export_runner
+    RequestHandler.act_review_runner = act_review_runner
+    RequestHandler.hamster_service = hamster_service
     server = ThreadingHTTPServer((args.host, args.port), RequestHandler)
     mode = "REAL ARM ENABLED" if args.real else "dry-run"
     print(f"WidowX AI interface running at http://{args.host}:{args.port} ({mode})")

@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hamster Vision Planner</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c20;
+      --panel-2: #20262b;
+      --text: #eef2f4;
+      --muted: #a6b0b8;
+      --accent: #37c48d;
+      --danger: #e45858;
+      --line: #2d363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
+    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 390px;
+      gap: 18px;
+      align-items: start;
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    button {
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    input[type="text"], select {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    .camera-controls, .hamster-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .fps-counter {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.58);
+      color: #f2f6f9;
+      padding: 3px 6px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .camera-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .hamster-panel {
+      grid-template-columns: minmax(0, 1fr);
+      margin: 0;
+    }
+    pre {
+      min-height: 120px;
+      max-height: 260px;
+      overflow: auto;
+      margin: 12px 0 0;
+      white-space: pre-wrap;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .hamster-result-image {
+      width: 100%;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0b0d0f;
+      display: none;
+    }
+    .note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    @media (max-width: 900px) {
+      header { align-items: stretch; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .camera-controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Hamster Vision Planner</h1>
+        <div class="sub">Use a selected local camera frame with the HAMSTER/VILA server on the DGX.</div>
+      </div>
+      <div class="nav">
+        <button onclick="location.href='/'">Control</button>
+        <button onclick="location.href='/teach'">Teaching</button>
+        <button onclick="location.href='/model-test'">Model test</button>
+      </div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2 class="side-title">Camera</h2>
+        <div class="camera-controls">
+          <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
+          <button onclick="refreshCameraHub(true)">Refresh cameras</button>
+          <button onclick="startCameraPreview()">Start live</button>
+          <button onclick="stopCameraPreview()">Stop live</button>
+        </div>
+        <div class="camera-view">
+          <img id="cameraImage" alt="Camera preview" onload="recordCameraFrame()" onerror="clearCameraFramePending()">
+          <span class="fps-counter" id="cameraFps">0 FPS</span>
+          <span id="cameraPlaceholder">No camera selected</span>
+        </div>
+        <div class="camera-meta">
+          <span id="cameraState">Scanning cameras</span>
+          <span id="cameraDetail"></span>
+        </div>
+      </section>
+      <aside>
+        <h2 class="side-title">Hamster</h2>
+        <div class="hamster-panel">
+          <input id="hamsterUrl" type="text" value="http://192.168.100.36:8000" aria-label="Hamster API URL">
+          <input id="hamsterPrompt" type="text" value="Move the tape to the target area" aria-label="Hamster quest">
+          <button class="primary" onclick="sendCameraToHamster()">Send selected frame</button>
+        </div>
+        <pre id="hamsterOutput">Hamster output will appear here.</pre>
+        <img class="hamster-result-image" id="hamsterResultImage" alt="Hamster annotated output">
+        <div class="note">The output image draws the predicted trajectory and gripper actions on the frame sent to Hamster.</div>
+      </aside>
+    </div>
+  </main>
+  <script>
+    let cameraRunning = false;
+    let cameraTimer = null;
+    let cameraSources = [];
+    let activeCameraSource = '';
+    let cameraFramePending = false;
+    let cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+
+    function log(msg) {
+      const output = document.getElementById('hamsterOutput');
+      const stamp = new Date().toLocaleTimeString();
+      output.textContent = `[${stamp}] ${msg}\n` + output.textContent;
+    }
+
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function resetCameraFps() {
+      cameraFramePending = false;
+      cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+      document.getElementById('cameraFps').textContent = '0 FPS';
+    }
+
+    function clearCameraFramePending() {
+      cameraFramePending = false;
+    }
+
+    function recordCameraFrame() {
+      cameraFramePending = false;
+      const now = Date.now();
+      cameraFpsCounter.count++;
+      if (now - cameraFpsCounter.lastTime >= 1000) {
+        cameraFpsCounter.fps = cameraFpsCounter.count;
+        cameraFpsCounter.count = 0;
+        cameraFpsCounter.lastTime = now;
+        document.getElementById('cameraFps').textContent = `${cameraFpsCounter.fps} FPS`;
+      }
+    }
+
+    function renderCameraSources(sources, activeSource) {
+      const select = document.getElementById('cameraSource');
+      const previous = select.value;
+      cameraSources = Array.isArray(sources) ? sources : [];
+      select.innerHTML = '';
+      if (cameraSources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        select.disabled = true;
+        activeCameraSource = '';
+        return;
+      }
+      select.disabled = false;
+      cameraSources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        select.appendChild(option);
+      });
+      const preferred = activeSource || previous;
+      const exists = cameraSources.some((source) => source.id === preferred);
+      select.value = exists ? preferred : cameraSources[0].id;
+      activeCameraSource = select.value;
+    }
+
+    function selectedCameraSource() {
+      return document.getElementById('cameraSource').value || '';
+    }
+
+    async function refreshCameraHub(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderCameraSources(data.sources || [], data.active_source);
+        activeCameraSource = data.active_source || selectedCameraSource();
+        document.getElementById('cameraState').textContent = data.sources.length
+          ? (data.running ? `Live stream active · ${data.active_label}` : `${data.sources.length} camera(s) detected`)
+          : 'No camera detected';
+        document.getElementById('cameraDetail').textContent = data.active_detail || '';
+        if (writeLog) log(data.message);
+        updateCameraView();
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    function cameraFrameUrl() {
+      const source = selectedCameraSource();
+      if (!source) return '';
+      return `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}`;
+    }
+
+    function stopCameraElement() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (cameraTimer) {
+        clearInterval(cameraTimer);
+        cameraTimer = null;
+      }
+      resetCameraFps();
+      img.src = '';
+      img.style.display = 'none';
+      placeholder.style.display = 'block';
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning) return;
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      if (cameraFramePending) return;
+      cameraFramePending = true;
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      img.src = frameUrl;
+    }
+
+    function updateCameraView() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (!cameraRunning) {
+        stopCameraElement();
+        placeholder.textContent = selectedCameraSource() ? 'Live stream stopped' : 'No camera selected';
+        return;
+      }
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      if (!cameraTimer) cameraTimer = setInterval(updateCameraFrame, 150);
+      img.src = frameUrl;
+    }
+
+    async function handleCameraSourceChange() {
+      activeCameraSource = selectedCameraSource();
+      resetCameraFps();
+      if (!cameraRunning) return;
+      await startCameraPreview();
+    }
+
+    async function startCameraPreview() {
+      try {
+        const source = selectedCameraSource();
+        if (!source) {
+          log('No camera selected');
+          return;
+        }
+        const data = await api('/api/video/start', {source, width: 640, height: 480});
+        log(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function stopCameraPreview() {
+      try {
+        const data = await api('/api/video/stop', {});
+        log(data.message);
+        stopCameraElement();
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function sendCameraToHamster() {
+      const output = document.getElementById('hamsterOutput');
+      const resultImage = document.getElementById('hamsterResultImage');
+      const source = selectedCameraSource();
+      if (!source) {
+        log('ERROR Hamster: no camera selected');
+        return;
+      }
+      try {
+        if (!cameraRunning) await startCameraPreview();
+        output.textContent = 'Sending selected camera frame to Hamster...';
+        resultImage.style.display = 'none';
+        resultImage.removeAttribute('src');
+        const data = await api('/api/hamster/send_camera', {
+          source,
+          base_url: document.getElementById('hamsterUrl').value.trim(),
+          prompt: document.getElementById('hamsterPrompt').value.trim()
+        });
+        output.textContent = data.answer || JSON.stringify(data.raw_response, null, 2);
+        if (data.output_image) {
+          resultImage.src = data.output_image;
+          resultImage.style.display = 'block';
+        }
+      } catch (err) {
+        output.textContent = `ERROR Hamster: ${err.message}`;
+        resultImage.style.display = 'none';
+      }
+    }
+
+    refreshCameraHub(false);
+    setInterval(() => refreshCameraHub(false), 2500);
+  </script>
+</body>
+</html>

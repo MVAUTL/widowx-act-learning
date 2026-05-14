@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WidowX AI Control</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c20;
+      --panel-2: #20262b;
+      --text: #eef2f4;
+      --muted: #a6b0b8;
+      --accent: #37c48d;
+      --danger: #e45858;
+      --warning: #e6b450;
+      --line: #2d363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.05;
+      font-weight: 720;
+    }
+    .sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 260px;
+      justify-content: space-between;
+      font-size: 14px;
+    }
+    .status-main {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--danger);
+    }
+    .dot.ok { background: var(--accent); }
+    .dot.warn { background: var(--warning); }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 18px;
+      align-items: start;
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .tool-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: flex-start;
+      align-content: flex-start;
+      min-height: 100%;
+      padding: 10px;
+      background: #151a1e;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .tool-meta {
+      width: 100%;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .tool-label {
+      min-width: 92px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    button {
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    button.danger { background: #642828; border-color: #9b3d3d; }
+    button.emergency {
+      width: 100%;
+      height: 64px;
+      background: #a51616;
+      border-color: #ff4d4d;
+      color: white;
+      font-size: 20px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .armed {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 0 12px;
+      background: #171a1d;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    input[type="checkbox"] { width: 18px; height: 18px; }
+    .joint {
+      display: grid;
+      grid-template-columns: 70px 1fr 92px;
+      gap: 12px;
+      align-items: center;
+      padding: 13px 0;
+      border-top: 1px solid var(--line);
+    }
+    .joint:first-child { border-top: 0; }
+    .joint label {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    input[type="range"] { width: 100%; }
+    input[type="number"], input[type="text"] {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    select {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 8px 12px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    pre {
+      min-height: 180px;
+      max-height: 340px;
+      overflow: auto;
+      margin: 0;
+      white-space: pre-wrap;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .camera-panel {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .camera-controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    select {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .fps-counter {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.58);
+      color: #f2f6f9;
+      padding: 3px 6px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .camera-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    .camera-note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .hamster-panel {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: start;
+    }
+    .hamster-panel input {
+      height: 40px;
+    }
+    .hamster-output {
+      min-height: 76px;
+      max-height: 180px;
+      margin-top: 10px;
+    }
+    .hamster-result-image {
+      width: 100%;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0b0d0f;
+      display: none;
+    }
+    @media (max-width: 880px) {
+      header { align-items: stretch; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .toolbar { grid-template-columns: 1fr; }
+      .joint { grid-template-columns: 56px 1fr 82px; gap: 8px; }
+      .camera-controls { grid-template-columns: 1fr; }
+      .hamster-panel { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>WidowX AI Control</h1>
+        <div class="sub" id="subtitle"></div>
+      </div>
+      <div class="status"><span class="status-main"><span class="dot warn" id="dot"></span> <span id="state">Initializing</span></span><span id="mode"></span></div>
+    </header>
+    <div class="layout">
+      <section>
+        <button class="emergency" onclick="emergencyStop()">Emergency stop</button>
+        <div class="toolbar">
+          <div class="tool-group">
+            <span class="tool-label">Session</span>
+            <button class="primary" onclick="connectArm()">Connect</button>
+            <button class="danger" onclick="disconnectArm()">Disconnect</button>
+            <button onclick="refreshStatus()">Refresh</button>
+            <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Positions</span>
+            <button onclick="home()">Home</button>
+            <button onclick="goToStartPosition()">Start position</button>
+            <button onclick="saveStartPosition()">Save start</button>
+            <button onclick="rest()">Rest</button>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Gripper</span>
+            <button onclick="gripper(10)">Open gripper</button>
+            <button onclick="gripper(-10)">Close gripper</button>
+            <div class="tool-meta">Opening: <span id="gripperStatus">n/a</span></div>
+          </div>
+          <div class="tool-group">
+            <span class="tool-label">Tools</span>
+            <button onclick="gravityCompensation()">Gravity comp</button>
+            <button id="holdButton" onclick="toggleHold()">Hold</button>
+            <button onclick="location.href='/teach'">Teaching</button>
+            <button onclick="location.href='/model-test'">Model test</button>
+            <button onclick="location.href='/hamster'">Hamster</button>
+          </div>
+        </div>
+        <div id="joints"></div>
+        <div class="camera-panel">
+          <h2 class="side-title">Camera Hub</h2>
+          <div class="camera-controls">
+            <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
+            <button onclick="refreshCameraHub(true)">Refresh cameras</button>
+            <button onclick="startCameraPreview()">Start live</button>
+            <button onclick="stopCameraPreview()">Stop live</button>
+          </div>
+          <div class="camera-view">
+            <img id="cameraImage" alt="Camera preview" onload="recordCameraFrame()" onerror="clearCameraFramePending()">
+            <span class="fps-counter" id="cameraFps">0 FPS</span>
+            <span id="cameraPlaceholder">No camera selected</span>
+          </div>
+          <div class="camera-meta">
+            <span id="cameraState">Scanning cameras</span>
+            <span id="cameraDetail"></span>
+          </div>
+          <div class="camera-note">One control module manages the D405 and all detected USB cameras from the same selector with a continuous live stream.</div>
+        </div>
+      </section>
+      <aside>
+        <h2 class="side-title">Configuration</h2>
+        <div class="kv">
+          <div>IP</div><div id="ip"></div>
+          <div>Variant</div><div id="variant"></div>
+          <div>Port</div><div id="port"></div>
+          <div>Gravity</div><div id="gravity"></div>
+          <div>Max speed</div><div><span id="speedValue"></span> rad/s</div>
+        </div>
+        <input id="speedSlider" type="range" min="0.05" max="1.5" step="0.05" value="0.3" oninput="setMaxSpeed(this.value)">
+        <p class="camera-note">Home, Rest, Demo, Return to start and replay follow this speed limit. Default is 0.30 rad/s.</p>
+        <h2 class="side-title">Log</h2>
+        <pre id="log"></pre>
+      </aside>
+    </div>
+  </main>
+  <script>
+    const limits = LIMITS_PLACEHOLDER;
+    let joints = [0, Math.PI / 2, Math.PI / 2, 0, 0, 0];
+    let config = {};
+    let cameraRunning = false;
+    let cameraTimer = null;
+    let cameraSources = [];
+    let activeCameraSource = '';
+    let resolutionState = { top_view: "640x480", d405: "640x480" };
+    let cameraFramePending = false;
+    let cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+
+    function resetCameraFps() {
+      cameraFramePending = false;
+      cameraFpsCounter = { count: 0, lastTime: Date.now(), fps: 0 };
+      const el = document.getElementById('cameraFps');
+      if (el) el.textContent = '0 FPS';
+    }
+
+    function clearCameraFramePending() {
+      cameraFramePending = false;
+    }
+
+    function recordCameraFrame() {
+      cameraFramePending = false;
+      const now = Date.now();
+      cameraFpsCounter.count++;
+      if (now - cameraFpsCounter.lastTime >= 1000) {
+        cameraFpsCounter.fps = cameraFpsCounter.count;
+        cameraFpsCounter.count = 0;
+        cameraFpsCounter.lastTime = now;
+        const el = document.getElementById('cameraFps');
+        if (el) el.textContent = `${cameraFpsCounter.fps} FPS`;
+      }
+    }
+
+    function log(msg) {
+      const el = document.getElementById('log');
+      const stamp = new Date().toLocaleTimeString();
+      el.textContent = `[${stamp}] ${msg}\n` + el.textContent;
+    }
+
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function renderJoints() {
+      const root = document.getElementById('joints');
+      root.innerHTML = '';
+      joints.forEach((value, i) => {
+        const row = document.createElement('div');
+        row.className = 'joint';
+        const min = limits[i][0], max = limits[i][1];
+        row.innerHTML = `
+          <label>Joint ${i}</label>
+          <input type="range" min="${min}" max="${max}" step="0.001" value="${value}" oninput="setJoint(${i}, this.value)">
+          <input type="number" min="${min}" max="${max}" step="0.001" value="${value.toFixed(3)}" onchange="setJoint(${i}, this.value)">
+        `;
+        root.appendChild(row);
+      });
+    }
+
+    function setJoint(i, value) {
+      joints[i] = Number(value);
+      renderJoints();
+      move();
+    }
+
+    async function move() {
+      if (!document.getElementById('armed').checked) return;
+      try {
+        const data = await api('/api/move', {positions: joints, armed: true});
+        log(data.message);
+        await refreshStatus(false);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    function updateStatus(data) {
+      config = data.config;
+      if (Array.isArray(data.positions) && data.positions.length >= 6) joints = data.positions.slice(0, 6);
+      document.getElementById('subtitle').textContent = `${config.real ? 'Real mode' : 'Dry-run'} · ${config.ip}`;
+      document.getElementById('mode').textContent = config.real ? 'REAL' : 'DRY';
+      document.getElementById('ip').textContent = config.ip;
+      document.getElementById('variant').textContent = config.variant;
+      document.getElementById('port').textContent = config.port;
+      document.getElementById('gravity').textContent = data.gravity_compensation ? 'on' : 'off';
+      document.getElementById('gripperStatus').textContent = formatGripperStatus(data.gripper_position);
+      document.getElementById('holdButton').textContent = data.hold ? 'Hold off' : 'Hold';
+      document.getElementById('speedValue').textContent = Number(data.max_speed).toFixed(2);
+      document.getElementById('speedSlider').value = data.max_speed;
+      document.getElementById('state').textContent = data.connected ? 'Connected' : 'Disconnected';
+      const dot = document.getElementById('dot');
+      dot.className = 'dot ' + (data.connected ? 'ok' : (config.real ? '' : 'warn'));
+      renderJoints();
+    }
+
+    function formatGripperStatus(position) {
+      if (position == null || !Number.isFinite(Number(position))) return 'n/a';
+      const meters = Number(position);
+      const mm = meters * 1000;
+      return `${mm.toFixed(1)} mm open`;
+    }
+
+    function setBackendOffline(message = 'No backend') {
+      document.getElementById('subtitle').textContent = message;
+      document.getElementById('mode').textContent = 'OFFLINE';
+      document.getElementById('state').textContent = 'No backend';
+      document.getElementById('dot').className = 'dot';
+      document.getElementById('cameraState').textContent = 'No backend';
+      document.getElementById('cameraDetail').textContent = 'Restart the control server';
+      document.getElementById('gripperStatus').textContent = 'n/a';
+      cameraRunning = false;
+      stopCameraElement();
+    }
+
+    async function setMaxSpeed(value) {
+      try {
+        const speed = Number(value);
+        document.getElementById('speedValue').textContent = speed.toFixed(2);
+        const data = await api('/api/max_speed', {max_speed: speed});
+        updateStatus(data);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    function gravityPayload() {
+      return {
+        armed: document.getElementById('armed').checked,
+        payload_profile: 'd405_follower',
+        camera_wrist_effort: 0.0
+      };
+    }
+
+    async function refreshStatus(writeLog = true) {
+      try {
+        const data = await api('/api/status');
+        updateStatus(data);
+        if (writeLog) log('Status updated');
+      } catch (err) {
+        setBackendOffline();
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function emergencyStop() {
+      try {
+        const data = await api('/api/emergency_stop', {});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR emergency: ${err.message}`);
+      }
+    }
+
+    function renderCameraSources(sources, activeSource) {
+      const select = document.getElementById('cameraSource');
+      const previous = select.value;
+      cameraSources = Array.isArray(sources) ? sources : [];
+      select.innerHTML = '';
+      if (cameraSources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        select.disabled = true;
+        activeCameraSource = '';
+        return;
+      }
+      select.disabled = false;
+      cameraSources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        select.appendChild(option);
+      });
+      const preferred = activeSource || previous;
+      const exists = cameraSources.some((source) => source.id === preferred);
+      select.value = exists ? preferred : cameraSources[0].id;
+      activeCameraSource = select.value;
+    }
+
+    function selectedCameraSource() {
+      const value = document.getElementById('cameraSource').value;
+      return value || '';
+    }
+
+    async function refreshCameraHub(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderCameraSources(data.sources || [], data.active_source);
+        activeCameraSource = data.active_source || selectedCameraSource();
+        document.getElementById('cameraState').textContent = data.sources.length
+          ? (data.running ? `Live stream active · ${data.active_label}` : `${data.sources.length} camera(s) detected`)
+          : 'No camera detected';
+        document.getElementById('cameraDetail').textContent = data.active_detail || '';
+        if (writeLog) log(data.message);
+        updateCameraView();
+      } catch (err) {
+        setBackendOffline();
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    function cameraFrameUrl() {
+      const source = selectedCameraSource();
+      if (!source) return '';
+      return `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}`;
+    }
+
+    function stopCameraElement() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (cameraTimer) {
+        clearInterval(cameraTimer);
+        cameraTimer = null;
+      }
+      resetCameraFps();
+      img.src = '';
+      img.style.display = 'none';
+      placeholder.style.display = 'block';
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning) return;
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      if (cameraFramePending) return;
+      cameraFramePending = true;
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      img.src = frameUrl;
+    }
+
+    function updateCameraView() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (!cameraRunning) {
+        stopCameraElement();
+        placeholder.textContent = selectedCameraSource() ? 'Live stream stopped' : 'No camera selected';
+        return;
+      }
+      const frameUrl = cameraFrameUrl();
+      if (!frameUrl) {
+        stopCameraElement();
+        placeholder.textContent = 'No camera selected';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      if (!cameraTimer) {
+        cameraTimer = setInterval(updateCameraFrame, 150);
+      }
+      img.src = frameUrl;
+    }
+
+    async function handleCameraSourceChange() {
+      activeCameraSource = selectedCameraSource();
+      resetCameraFps();
+      if (!cameraRunning) return;
+      await startCameraPreview();
+    }
+
+    async function startCameraPreview() {
+      try {
+        const source = selectedCameraSource();
+        if (!source) {
+          log('No camera selected');
+          return;
+        }
+        let res = "640x480";
+        if (source.includes('d405')) res = resolutionState.d405;
+        else res = resolutionState.top_view;
+        const [w, h] = res.split('x').map(Number);
+        const data = await api('/api/video/start', {source, width: w, height: h});
+        log(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function stopCameraPreview() {
+      try {
+        const data = await api('/api/video/stop', {});
+        log(data.message);
+        stopCameraElement();
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function connectArm() {
+      try {
+        const data = await api('/api/connect', {});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function disconnectArm() {
+      try {
+        const data = await api('/api/disconnect', {});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function home() {
+      try {
+        const data = await api('/api/home', {armed: document.getElementById('armed').checked});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function rest() {
+      try {
+        const data = await api('/api/rest', {armed: document.getElementById('armed').checked});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function gripper(effort) {
+      try {
+        const data = await api('/api/gripper', {effort, armed: document.getElementById('armed').checked});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function saveStartPosition() {
+      try {
+        const data = await api('/api/start_position/save', {});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR start position: ${err.message}`);
+      }
+    }
+
+    async function goToStartPosition() {
+      try {
+        const data = await api('/api/start_position/go', {armed: document.getElementById('armed').checked});
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR start position: ${err.message}`);
+      }
+    }
+
+    async function gravityCompensation() {
+      try {
+        const data = await api('/api/gravity_compensation', gravityPayload());
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function toggleHold() {
+      try {
+        const payload = gravityPayload();
+        payload.enabled = document.getElementById('holdButton').textContent === 'Hold';
+        const data = await api('/api/hold', payload);
+        updateStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    refreshStatus();
+    refreshCameraHub();
+    setInterval(() => refreshStatus(false), 2000);
+    setInterval(() => refreshCameraHub(false), 4000);
+  </script>
+</body>
+</html>
