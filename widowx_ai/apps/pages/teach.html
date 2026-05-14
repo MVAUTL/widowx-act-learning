@@ -1,0 +1,2238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WidowX AI Teaching</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c20;
+      --panel-2: #20262b;
+      --text: #eef2f4;
+      --muted: #a6b0b8;
+      --accent: #37c48d;
+      --danger: #e45858;
+      --warning: #e6b450;
+      --line: #2d363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
+    a { color: var(--accent); text-decoration: none; }
+    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 18px;
+      align-items: start;
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .toolbar-block {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 12px;
+      background: #111518;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .toolbar-title {
+      min-width: 90px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    button {
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    button.danger { background: #642828; border-color: #9b3d3d; }
+    button.emergency {
+      width: 100%;
+      height: 64px;
+      background: #a51616;
+      border-color: #ff4d4d;
+      color: white;
+      font-size: 20px;
+      font-weight: 800;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .armed {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 0 12px;
+      background: #171a1d;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    input[type="checkbox"] { width: 18px; height: 18px; }
+    input[type="number"], input[type="text"], select {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .field label {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px 12px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    pre {
+      min-height: 260px;
+      max-height: 460px;
+      overflow: auto;
+      margin: 0;
+      white-space: pre-wrap;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+      margin-bottom: 16px;
+    }
+    .teaching-shell {
+      display: grid;
+      gap: 16px;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    .hero-card, .control-card, .review-shell {
+      background: #111518;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .hero-card h2, .control-card h3, .review-shell h3 {
+      margin: 0;
+    }
+    .hero-title {
+      font-size: 22px;
+      line-height: 1.15;
+      margin-bottom: 8px;
+    }
+    .hero-copy {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+      margin-bottom: 14px;
+    }
+    .hero-points {
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .hero-points strong {
+      color: var(--text);
+      font-weight: 650;
+    }
+    .hero-actions {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .emergency-inline {
+      height: 52px;
+      font-size: 17px;
+      margin-bottom: 0;
+    }
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .step-card {
+      background: #151a1e;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .step-card.review {
+      grid-column: 1 / -1;
+    }
+    .step-card.camera-capture-card {
+      grid-column: 1 / -1;
+    }
+    .step-kicker {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .step-card h3 {
+      margin: 0 0 14px;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+    .card-subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 6px 0 14px;
+    }
+    .action-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .action-row button {
+      min-width: 120px;
+    }
+    .capture-row {
+      display: grid;
+      grid-template-columns: 88px 88px minmax(160px, 0.9fr);
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .capture-row button {
+      min-width: 0;
+      width: 100%;
+      padding: 0 10px;
+    }
+    .return-start-button {
+      max-width: 180px;
+      justify-self: start;
+    }
+    .secondary-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .secondary-row button {
+      height: 34px;
+      padding: 0 10px;
+      font-size: 13px;
+    }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .crop-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .crop-grid .wide {
+      grid-column: 1 / -1;
+    }
+    .capture-settings-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      margin-top: 12px;
+    }
+    .capture-panel {
+      background: #101417;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .capture-panel h4 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+    .capture-panel.hidden {
+      display: none;
+    }
+    .preview-panel.selectable {
+      cursor: pointer;
+    }
+    .preview-panel.selectable.active {
+      border-color: var(--accent);
+    }
+    .capture-summary {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0d1114;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .capture-summary strong {
+      color: var(--text);
+      font-weight: 650;
+    }
+    .check-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      padding: 0 10px;
+      background: #101417;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .mode-summary {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .mode-summary strong {
+      color: var(--text);
+      font-weight: 650;
+    }
+    .act-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .act-output {
+      min-height: 220px;
+      max-height: 440px;
+    }
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 12px 0 14px;
+    }
+    .quality-tile {
+      min-height: 72px;
+      padding: 12px;
+      background: #101417;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .quality-value {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+      font-weight: 720;
+    }
+    .quality-label {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 0;
+    }
+    .preview-grid.four-up {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .preview-grid.four-up .camera-view {
+      min-height: 300px;
+    }
+    .preview-panel {
+      background: #151a1e;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .preview-panel.compact {
+      padding: 12px;
+    }
+    .preview-title {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .camera-control-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .quick-actions button {
+      flex: 1 1 160px;
+    }
+    .review-shell {
+      margin-top: 0;
+    }
+    .review-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 12px;
+    }
+    .utility-note {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 12px;
+      background: #101417;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .status-pill.live {
+      color: #ffd8d8;
+      border-color: #8a3a3a;
+      background: #261414;
+    }
+    .status-led {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #5c6770;
+      flex: 0 0 auto;
+    }
+    .status-pill.live .status-led {
+      background: #ff5f5f;
+      box-shadow: 0 0 0 4px rgba(255, 95, 95, 0.18);
+    }
+    .status-pill.ok {
+      color: #d7f7ea;
+      border-color: #2b8c67;
+      background: #112019;
+    }
+    .status-pill.ok .status-led {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(55, 196, 141, 0.18);
+    }
+    .status-pill.warn .status-led {
+      background: var(--warning);
+      box-shadow: 0 0 0 4px rgba(230, 180, 80, 0.18);
+    }
+    .inline-preview {
+      margin-top: 14px;
+    }
+    .review-meta {
+      min-height: 42px;
+      margin-top: 10px;
+      margin-bottom: 0;
+      overflow-wrap: anywhere;
+    }
+    .review {
+      margin-top: 0;
+    }
+    .review-controls {
+      display: grid;
+      grid-template-columns: 1fr repeat(6, auto);
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .frame-controls {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    .video-controls {
+      display: grid;
+      grid-template-columns: auto auto 1fr;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    .playback-state {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    input[type="range"] { width: 100%; }
+    @media (max-width: 880px) {
+      header { align-items: stretch; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .toolbar, .hero, .control-grid, .preview-grid, .preview-grid.four-up, .settings-grid, .camera-control-row, .review-head, .capture-settings-grid { grid-template-columns: 1fr; }
+      .capture-row { grid-template-columns: 1fr; }
+      .review-controls { grid-template-columns: 1fr; }
+      .frame-controls { grid-template-columns: 1fr; }
+      .video-controls { grid-template-columns: 1fr; }
+      .playback-state { text-align: left; }
+      .act-grid, .quality-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Teach ACT</h1>
+        <div class="sub">Collecte WidowX compatible LeRobot ACT: observations camera + state, actions futures, labels de tache</div>
+      </div>
+      <a href="/">Back to control</a>
+    </header>
+    <div class="layout">
+      <section>
+        <div class="toolbar">
+          <div class="toolbar-block">
+            <span class="toolbar-title">Session</span>
+            <button class="primary" onclick="connectArm()">Connect</button>
+            <button class="danger" onclick="disconnectArm()">Disconnect</button>
+            <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
+            <div class="status-pill warn" id="teachConnectionPill">
+              <span class="status-led"></span>
+              <span id="teachConnectionText">Disconnected</span>
+            </div>
+          </div>
+          <div class="toolbar-block">
+            <span class="toolbar-title">Quick tools</span>
+            <button class="danger emergency-inline" onclick="emergencyStop()">Emergency stop</button>
+            <button onclick="gravityCompensation()">Gravity comp</button>
+            <button id="holdButton" onclick="toggleHold()">Hold</button>
+            <button onclick="gripper(10)">Open gripper</button>
+            <button onclick="gripper(-10)">Close gripper</button>
+          </div>
+        </div>
+        <div class="teaching-shell">
+          <input id="cameraMode" type="hidden" value="color">
+          <input id="payloadProfile" type="hidden" value="d405_follower">
+          <input id="wristEffortSlider" type="hidden" value="0">
+          <span id="wristEffortValue" hidden>0.00</span>
+
+          <div class="control-grid">
+            <div class="control-card">
+              <div class="step-kicker">Prepare</div>
+              <h3>Start position</h3>
+              <div class="card-subtitle">Sauvegarde une pose de depart stable, puis ramene toujours le bras ici avant une nouvelle demo.</div>
+              <div class="quick-actions">
+                <button onclick="saveStartPosition()">Save current as start</button>
+                <button class="primary" onclick="goToStartPosition()">Go to start position</button>
+              </div>
+            </div>
+
+            <div class="step-card">
+              <div class="step-kicker">Step 1</div>
+              <h3>Record source motion</h3>
+              <div class="card-subtitle">Passe en gravity compensation, guide le bras a la main, puis sauvegarde une demo source sans video.</div>
+              <div class="field">
+                <label>Source movement name</label>
+                <input id="sourceSessionName" type="text" placeholder="push_cube_source_01">
+              </div>
+              <div class="action-row">
+                <button class="primary" onclick="startRecording()">Start source record</button>
+                <button class="danger" onclick="stopRecording()">Stop record</button>
+              </div>
+              <div class="mode-summary">
+                <div><strong>Source mode:</strong> gravity compensation, motor state at 100 Hz, no camera.</div>
+                <div><strong>Output:</strong> a replayable source movement for dataset capture.</div>
+              </div>
+            </div>
+
+            <div class="step-card camera-capture-card">
+              <div class="step-kicker">Camera</div>
+              <h3>Camera capture</h3>
+              <div class="card-subtitle">Regle les sources video et le crop avant de lancer la capture dataset. La D405 RGB et depth sont enregistrees ensemble.</div>
+              <div class="capture-settings-grid">
+                <div class="capture-panel">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 class="preview-title" style="margin-bottom: 0;">Live previews</h3>
+                    <div style="display: flex; gap: 8px;">
+                      <button style="height: 32px;" onclick="refreshTeachCameras(true)">Refresh</button>
+                      <button class="primary" style="height: 32px;" onclick="startCamera()">Start preview</button>
+                    </div>
+                  </div>
+                  <div class="preview-panel inline-preview" style="border: none; padding: 0; background: transparent; margin-top: 0;">
+                    <div class="preview-grid four-up">
+                      <div class="preview-panel compact selectable" id="previewPanelTop" onclick="selectCropRole('top_view')">
+                        <h3 class="preview-title">Top camera</h3>
+                        <div class="camera-view">
+                          <img id="cameraImageTop" alt="Top camera live preview" onload="recordFrame('top_view')" onerror="clearPendingFrame('top_view')">
+                          <span class="fps-counter" id="fpsTop" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
+                          <span id="cameraPlaceholderTop">Camera inactive</span>
+                        </div>
+                      </div>
+                      <div class="preview-panel compact selectable" id="previewPanelFront" onclick="selectCropRole('front')">
+                        <h3 class="preview-title">Front camera</h3>
+                        <div class="camera-view">
+                          <img id="cameraImageFront" alt="Front camera live preview" onload="recordFrame('front')" onerror="clearPendingFrame('front')">
+                          <span class="fps-counter" id="fpsFront" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
+                          <span id="cameraPlaceholderFront">Camera inactive</span>
+                        </div>
+                      </div>
+                      <div class="preview-panel compact selectable" id="previewPanelWristRgb" onclick="selectCropRole('wrist_rgb')">
+                        <h3 class="preview-title">D405 RGB</h3>
+                        <div class="camera-view">
+                          <img id="cameraImageD405Rgb" alt="D405 RGB live preview" onload="recordFrame('wrist_rgb')" onerror="clearPendingFrame('wrist_rgb')">
+                          <span class="fps-counter" id="fpsWristRgb" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
+                          <span id="cameraPlaceholderD405Rgb">Camera inactive</span>
+                        </div>
+                      </div>
+                      <div class="preview-panel compact selectable" id="previewPanelWristDepth" onclick="selectCropRole('wrist_depth')">
+                        <h3 class="preview-title">D405 depth</h3>
+                        <div class="camera-view">
+                          <img id="cameraImageD405Depth" alt="D405 depth live preview" onload="recordFrame('wrist_depth')" onerror="clearPendingFrame('wrist_depth')">
+                          <span class="fps-counter" id="fpsWristDepth" style="position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.5); padding: 2px 4px; border-radius: 4px; font-size: 10px;">0 FPS</span>
+                          <span id="cameraPlaceholderD405Depth">Camera inactive</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="capture-panel hidden" id="cropOutputPanel">
+                  <h4>Camera Settings</h4>
+                  <div class="field">
+                    <label><input id="cameraCaptureEnabled" type="checkbox" checked onchange="updateCameraCaptureEnabled()"> Enable recording for this camera</label>
+                  </div>
+                  <div class="field" id="resolutionSelectorField">
+                    <label>Resolution</label>
+                    <select id="cameraResolution" onchange="updateCameraResolution()"></select>
+                  </div>
+                  <div class="field" id="topCameraSelectorField" style="display: none;">
+                    <label>Top camera source</label>
+                    <select id="teachCameraSource" onchange="updateCaptureSummary(); updateCameraFrame();"></select>
+                  </div>
+                  <div class="field" id="frontCameraSelectorField" style="display: none;">
+                    <label>Front camera source</label>
+                    <select id="frontCameraSource" onchange="updateCaptureSummary(); updateCameraFrame();"></select>
+                  </div>
+                  <div class="field">
+                    <label><input id="datasetCropEnabled" type="checkbox" onchange="updateCaptureSummary(); updateCameraFrame();"> Crop video flux</label>
+                    <div class="crop-grid">
+                      <div>
+                    <label>Apply crop to</label>
+                        <select id="datasetCropTarget" onchange="updateCaptureSummary(); updateCameraFrame();">
+                          <option value="all" selected>All cameras</option>
+                          <option value="usb">Top + front cameras</option>
+                          <option value="top">Top camera</option>
+                          <option value="front">Front camera</option>
+                          <option value="d405">D405 RGB/depth</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label>Ratio</label>
+                        <select id="datasetCropAspect" onchange="updateCaptureSummary(); updateCameraFrame();">
+                          <option value="source" selected>Keep source</option>
+                          <option value="1:1">1:1 square</option>
+                          <option value="4:3">4:3</option>
+                          <option value="16:9">16:9</option>
+                          <option value="3:2">3:2</option>
+                          <option value="9:16">9:16 vertical</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label>Zoom <span id="datasetCropZoomValue">1.00</span>x</label>
+                        <input id="datasetCropZoom" type="range" min="1" max="4" step="0.05" value="1" oninput="document.getElementById('datasetCropZoomValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary(); updateCameraFrame();">
+                      </div>
+                      <div>
+                        <label>Offset X <span id="datasetCropXValue">0.00</span></label>
+                        <input id="datasetCropX" type="range" min="-1" max="1" step="0.05" value="0" oninput="document.getElementById('datasetCropXValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary(); updateCameraFrame();">
+                      </div>
+                      <div class="wide">
+                        <label>Offset Y <span id="datasetCropYValue">0.00</span></label>
+                        <input id="datasetCropY" type="range" min="-1" max="1" step="0.05" value="0" oninput="document.getElementById('datasetCropYValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary(); updateCameraFrame();">
+                      </div>
+                    </div>
+                  </div>
+                  <div class="capture-summary" id="captureParamPreview"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="step-card review">
+              <div class="step-kicker">Step 2</div>
+              <h3>Replay and capture</h3>
+              <div class="card-subtitle">Choisis une demo source, rejoue-la, puis capture simultanement la top cam et la D405 en RGB ou depth.</div>
+              <div class="status-pill" id="datasetCaptureIndicator">
+                <span class="status-led"></span>
+                <span id="datasetCaptureIndicatorText">Capture idle</span>
+              </div>
+              <div class="note">
+                Cette liste ne montre que les demos source rejouables, pas les datasets deja captures.
+              </div>
+              <div class="capture-row">
+                <button onclick="previousSourceRecording()">Previous</button>
+                <button onclick="nextSourceRecording()">Next</button>
+                <button class="return-start-button" onclick="goToStartPosition()">Return to start</button>
+              </div>
+              <div class="field">
+                <label>Recorded demo to replay</label>
+                <select id="recordingSelect" onchange="loadSelectedRecording(); updateCaptureSummary();"></select>
+              </div>
+              <div class="field">
+                <label>Task label</label>
+                <input id="datasetTaskName" type="text" value="push_cube_5cm" placeholder="push_cube_5cm" oninput="updateCaptureSummary()">
+              </div>
+              <div class="field">
+                <label>Replay speed <span id="replaySpeedValue">0.75</span>x</label>
+                <input id="replaySpeed" type="range" min="0.25" max="1" step="0.05" value="0.75" oninput="document.getElementById('replaySpeedValue').textContent = Number(this.value).toFixed(2); updateCaptureSummary();">
+              </div>
+              <div class="action-row">
+                <button onclick="startReplay()">Replay movement</button>
+                <button class="primary" onclick="startDatasetCapture()">Replay movement + record camera</button>
+              </div>
+              <div class="mode-summary">
+                <div><strong>Replay movement:</strong> robot motion only.</div>
+                <div><strong>Replay movement + record camera:</strong> D405 RGB/depth + selected top camera at 30 Hz synchronized with motor samples at 100 Hz.</div>
+              </div>
+              <div class="secondary-row">
+                <button class="danger" onclick="deleteRecording()">Delete selected</button>
+                <button class="danger" onclick="clearRecordings()">Delete all</button>
+              </div>
+            </div>
+
+            <div class="step-card review">
+              <div class="step-kicker">Step 3</div>
+              <h3>LeRobot Dataset export</h3>
+              <div class="card-subtitle">Convertit les captures WidowX en LeRobotDataset: parquet + meta + images ou videos. L'entrainement ACT reste prevu sur DGX.</div>
+              <div class="act-grid">
+                <div class="field">
+                  <label>HF dataset repo id</label>
+                  <input id="actRepoId" type="text" value="matteo/widowx-push-cube-local" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Dataset folder name</label>
+                  <input id="actDatasetName" type="text" value="widowx_push_cube_full" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Cameras for ACT</label>
+                  <select id="actCameras" onchange="refreshActPlan(false)">
+                    <option value="top_view,wrist_rgb" selected>top_view + wrist_rgb</option>
+                    <option value="front,wrist_rgb">front + wrist_rgb</option>
+                    <option value="top_view,front,wrist_rgb">top_view + front + wrist_rgb</option>
+                    <option value="top_view">top_view only</option>
+                    <option value="front">front only</option>
+                    <option value="wrist_rgb">wrist_rgb only</option>
+                    <option value="top_view,front,wrist_rgb,wrist_depth">top_view + front + wrist_rgb + wrist_depth</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>LeRobot output root</label>
+                  <input id="actOutputRoot" type="text" value="/tmp/lerobot_datasets/widowx_push_cube_full" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Media storage</label>
+                  <select id="actUseVideos" onchange="refreshActPlan(false)">
+                    <option value="false" selected>parquet + meta + images</option>
+                    <option value="true">parquet + meta + videos</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Max episodes</label>
+                  <input id="actMaxEpisodes" type="number" min="1" step="1" placeholder="all" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Training steps</label>
+                  <input id="actSteps" type="number" min="200" step="100" value="10000" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label>Batch size</label>
+                  <input id="actBatchSize" type="number" min="1" step="1" value="8" oninput="refreshActPlan(false)">
+                </div>
+                <div class="field">
+                  <label><input id="actOverwrite" type="checkbox" checked onchange="refreshActPlan(false)"> Overwrite output folder</label>
+                </div>
+              </div>
+              <div class="quality-grid">
+                <div class="quality-tile"><span class="quality-value" id="actEpisodes">0</span><span class="quality-label">dataset episodes</span></div>
+                <div class="quality-tile"><span class="quality-value" id="actFrames">0</span><span class="quality-label">camera frames</span></div>
+                <div class="quality-tile"><span class="quality-value" id="actTasks">0</span><span class="quality-label">task labels</span></div>
+                <div class="quality-tile"><span class="quality-value" id="actReady">-</span><span class="quality-label">ACT readiness</span></div>
+              </div>
+              <div class="status-pill" id="lerobotExportPill">
+                <span class="status-led"></span>
+                <span id="lerobotExportText">Export idle</span>
+              </div>
+              <div class="action-row">
+                <button onclick="refreshActPlan(true)">Refresh ACT plan</button>
+                <button class="primary" onclick="startLeRobotExport()">Export LeRobotDataset</button>
+                <button onclick="openActReview()">Open ACT review</button>
+                <button onclick="openMonitor()">Open training monitor</button>
+              </div>
+              <pre class="act-output" id="actPlanOutput">ACT plan not loaded yet.</pre>
+              <pre class="act-output" id="lerobotExportOutput">LeRobot export not started yet.</pre>
+            </div>
+          </div>
+
+          <div class="review-shell">
+            <h3>Review</h3>
+            <div class="card-subtitle">Controle visuellement la capture avant de passer a la demo suivante.</div>
+            <div class="review-head">
+              <div class="field">
+                <label>Recording to review</label>
+                <select id="reviewRecordingSelect" onchange="loadReviewRecording()"></select>
+              </div>
+              <button onclick="previousRecording()">Previous</button>
+              <button onclick="nextRecording()">Next</button>
+            </div>
+            <div class="preview-panel compact">
+              <h3 class="preview-title">Selected recording</h3>
+              <div class="preview-grid four-up">
+                <div class="preview-panel">
+                  <h3 class="preview-title">Top camera</h3>
+                  <div class="camera-view">
+                    <img id="reviewImageTop" alt="Recorded top camera preview">
+                    <span id="reviewPlaceholderTop">No recording selected</span>
+                  </div>
+                </div>
+                <div class="preview-panel">
+                  <h3 class="preview-title">Front camera</h3>
+                  <div class="camera-view">
+                    <img id="reviewImageFront" alt="Recorded front camera preview">
+                    <span id="reviewPlaceholderFront">No recording selected</span>
+                  </div>
+                </div>
+                <div class="preview-panel">
+                  <h3 class="preview-title">Wrist RGB</h3>
+                  <div class="camera-view">
+                    <img id="reviewImageWristRgb" alt="Recorded wrist RGB preview">
+                    <span id="reviewPlaceholderWristRgb">No recording selected</span>
+                  </div>
+                </div>
+                <div class="preview-panel">
+                  <h3 class="preview-title">Wrist depth</h3>
+                  <div class="camera-view">
+                    <img id="reviewImageWristDepth" alt="Recorded wrist depth preview">
+                    <span id="reviewPlaceholderWristDepth">No recording selected</span>
+                  </div>
+                </div>
+              </div>
+              <div class="video-controls">
+                <button id="reviewPlayButton" onclick="toggleReviewPlayback()">Play</button>
+                <button onclick="stopReviewPlayback(true)">Stop</button>
+                <div class="playback-state" id="reviewPlaybackState">0:00 / 0:00</div>
+              </div>
+              <div class="frame-controls">
+                <button onclick="stepFrame(-1)">Frame -</button>
+                <input id="frameSlider" type="range" min="0" max="0" step="1" value="0" oninput="showFrame(Number(this.value))">
+                <button onclick="stepFrame(1)">Frame +</button>
+              </div>
+              <div class="note review-meta" id="reviewMeta"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <aside>
+        <h2 class="side-title">Status</h2>
+        <div class="kv">
+          <div>Camera</div><div id="cameraState">-</div>
+          <div>Start pos</div><div id="startPoseState">-</div>
+          <div>Record</div><div id="recordState">-</div>
+          <div>Replay</div><div id="replayState">-</div>
+          <div>Dataset</div><div id="datasetState">-</div>
+          <div>Samples</div><div id="samples">0</div>
+          <div>Folder</div><div id="sessionDir">-</div>
+        </div>
+        <h2 class="side-title">Log</h2>
+        <pre id="log"></pre>
+      </aside>
+    </div>
+  </main>
+  <script>
+    let cameraTimer = null;
+    let cameraRunning = false;
+    let teachCameraSources = [];
+    let activeTeachCameraSource = '';
+    let recordings = [];
+    let reviewRecordings = [];
+    let selectedRecording = null;
+    let reviewFrames = [];
+    let reviewIndex = 0;
+    let reviewPlaying = false;
+    let reviewPlaybackTimer = null;
+    let lastDatasetRunning = false;
+    let activeCropRole = 'all';
+    let cameraCaptureState = { top_view: true, front: false, wrist_rgb: true, wrist_depth: true };
+    let fpsCounters = {
+      top_view: { count: 0, lastTime: Date.now(), fps: 0 },
+      front: { count: 0, lastTime: Date.now(), fps: 0 },
+      wrist_rgb: { count: 0, lastTime: Date.now(), fps: 0 },
+      wrist_depth: { count: 0, lastTime: Date.now(), fps: 0 }
+    };
+    let pendingFrames = { top_view: false, front: false, wrist_rgb: false, wrist_depth: false };
+    let resolutionState = { top_view: "640x480", front: "640x480", d405: "640x480" };
+    const TEACH_CAMERA_SETTINGS_KEY = 'widowxTeachCameraSettings.v1';
+
+    function loadCameraSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(TEACH_CAMERA_SETTINGS_KEY) || '{}');
+      } catch (_err) {
+        return {};
+      }
+    }
+
+    function saveCameraSettings() {
+      const previous = loadCameraSettings();
+      const topSource = document.getElementById('teachCameraSource')?.value || previous.top_source || '';
+      const frontSource = document.getElementById('frontCameraSource')?.value || previous.front_source || '';
+      const settings = {
+        camera_capture_state: cameraCaptureState,
+        resolution_state: resolutionState,
+        top_source: topSource,
+        front_source: frontSource,
+        crop_enabled: Boolean(document.getElementById('datasetCropEnabled')?.checked),
+        crop_target: document.getElementById('datasetCropTarget')?.value || previous.crop_target || 'all',
+        crop_aspect: document.getElementById('datasetCropAspect')?.value || previous.crop_aspect || 'source',
+        crop_zoom: document.getElementById('datasetCropZoom')?.value || previous.crop_zoom || '1',
+        crop_x: document.getElementById('datasetCropX')?.value || previous.crop_x || '0',
+        crop_y: document.getElementById('datasetCropY')?.value || previous.crop_y || '0',
+        replay_speed: document.getElementById('replaySpeed')?.value || previous.replay_speed || '0.75',
+        task_name: document.getElementById('datasetTaskName')?.value || previous.task_name || 'push_cube_5cm'
+      };
+      localStorage.setItem(TEACH_CAMERA_SETTINGS_KEY, JSON.stringify(settings));
+    }
+
+    function applyCameraSettings() {
+      const settings = loadCameraSettings();
+      if (settings.camera_capture_state && typeof settings.camera_capture_state === 'object') {
+        cameraCaptureState = {...cameraCaptureState, ...settings.camera_capture_state};
+      }
+      if (settings.resolution_state && typeof settings.resolution_state === 'object') {
+        resolutionState = {...resolutionState, ...settings.resolution_state};
+      }
+      const pairs = [
+        ['datasetCropEnabled', 'checked', Boolean(settings.crop_enabled)],
+        ['datasetCropTarget', 'value', settings.crop_target],
+        ['datasetCropAspect', 'value', settings.crop_aspect],
+        ['datasetCropZoom', 'value', settings.crop_zoom],
+        ['datasetCropX', 'value', settings.crop_x],
+        ['datasetCropY', 'value', settings.crop_y],
+        ['replaySpeed', 'value', settings.replay_speed],
+        ['datasetTaskName', 'value', settings.task_name]
+      ];
+      pairs.forEach(([id, prop, value]) => {
+        const el = document.getElementById(id);
+        if (el && value !== undefined && value !== null && value !== '') el[prop] = value;
+      });
+      if (document.getElementById('replaySpeedValue') && settings.replay_speed) {
+        document.getElementById('replaySpeedValue').textContent = Number(settings.replay_speed).toFixed(2);
+      }
+      if (document.getElementById('datasetCropZoomValue') && settings.crop_zoom) {
+        document.getElementById('datasetCropZoomValue').textContent = Number(settings.crop_zoom).toFixed(2);
+      }
+      if (document.getElementById('datasetCropXValue') && settings.crop_x) {
+        document.getElementById('datasetCropXValue').textContent = Number(settings.crop_x).toFixed(2);
+      }
+      if (document.getElementById('datasetCropYValue') && settings.crop_y) {
+        document.getElementById('datasetCropYValue').textContent = Number(settings.crop_y).toFixed(2);
+      }
+    }
+
+    function populateResolutions() {
+      const resSelect = document.getElementById('cameraResolution');
+      if (!resSelect || !activeCropRole) return;
+      const isD405 = activeCropRole === 'wrist_rgb' || activeCropRole === 'wrist_depth';
+      const options = isD405
+        ? ["640x480", "848x480", "1280x720"]
+        : ["640x480", "800x600", "1280x720", "1920x1080"];
+      resSelect.innerHTML = '';
+      options.forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt;
+        option.textContent = opt;
+        resSelect.appendChild(option);
+      });
+      resSelect.value = resolutionState[isD405 ? 'd405' : activeCropRole === 'front' ? 'front' : 'top_view'];
+    }
+
+    function updateCameraResolution() {
+      if (!activeCropRole) return;
+      const isD405 = activeCropRole === 'wrist_rgb' || activeCropRole === 'wrist_depth';
+      resolutionState[isD405 ? 'd405' : activeCropRole === 'front' ? 'front' : 'top_view'] = document.getElementById('cameraResolution').value;
+      saveCameraSettings();
+      updateCaptureSummary();
+    }
+
+    function clearPendingFrame(role) {
+      pendingFrames[role] = false;
+    }
+
+    function recordFrame(role) {
+      pendingFrames[role] = false;
+      const now = Date.now();
+      const counter = fpsCounters[role];
+      counter.count++;
+      if (now - counter.lastTime >= 1000) {
+        counter.fps = counter.count;
+        counter.count = 0;
+        counter.lastTime = now;
+        const elId = role === 'top_view' ? 'fpsTop' : role === 'front' ? 'fpsFront' : (role === 'wrist_rgb' ? 'fpsWristRgb' : 'fpsWristDepth');
+        const el = document.getElementById(elId);
+        if (el) el.textContent = `${counter.fps} FPS`;
+      }
+    }
+
+    function updateCameraCaptureEnabled() {
+      if (activeCropRole) {
+        cameraCaptureState[activeCropRole] = document.getElementById('cameraCaptureEnabled').checked;
+        saveCameraSettings();
+        updateCaptureSummary();
+        updateCameraLoop();
+      }
+    }
+
+    function log(msg) {
+      const el = document.getElementById('log');
+      const stamp = new Date().toLocaleTimeString();
+      el.textContent = `[${stamp}] ${msg}\n` + el.textContent;
+    }
+
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function actPayload() {
+      const maxEpisodesRaw = document.getElementById('actMaxEpisodes')?.value;
+      const maxEpisodes = maxEpisodesRaw ? Number(maxEpisodesRaw) : null;
+      return {
+        repo_id: document.getElementById('actRepoId')?.value.trim() || 'matteo/widowx-push-cube-local',
+        dataset_name: document.getElementById('actDatasetName')?.value.trim() || 'widowx_push_cube_full',
+        cameras: document.getElementById('actCameras')?.value || 'top_view,wrist_rgb',
+        output_root: document.getElementById('actOutputRoot')?.value.trim() || '/tmp/lerobot_datasets/widowx_push_cube_full',
+        use_videos: document.getElementById('actUseVideos')?.value === 'true',
+        overwrite: Boolean(document.getElementById('actOverwrite')?.checked),
+        max_episodes: Number.isFinite(maxEpisodes) ? maxEpisodes : null,
+        steps: Number(document.getElementById('actSteps')?.value || 10000),
+        batch_size: Number(document.getElementById('actBatchSize')?.value || 8)
+      };
+    }
+
+    function renderActPlan(data) {
+      document.getElementById('actEpisodes').textContent = data.dataset.episodes;
+      document.getElementById('actFrames').textContent = data.dataset.frames;
+      document.getElementById('actTasks').textContent = data.dataset.tasks;
+      document.getElementById('actReady').textContent = data.dataset.ready ? 'yes' : 'check';
+      const warnings = data.dataset.warnings.length
+        ? `Warnings:\n${data.dataset.warnings.map((item) => `- ${item}`).join('\n')}\n\n`
+        : '';
+      document.getElementById('actPlanOutput').textContent =
+        `${warnings}LeRobotDataset output:\n${data.dataset.output_root}\nFormat: ${data.dataset.media_storage}\n\nConvert local captures to LeRobotDataset:\n${data.commands.convert}\n\nTrain ACT on DGX:\n${data.commands.train}\n\nDGX SLURM shortcuts:\n${data.commands.slurm}`;
+    }
+
+    async function refreshActPlan(writeLog = false) {
+      try {
+        const data = await api('/api/act_dataset/plan', actPayload());
+        renderActPlan(data);
+        if (writeLog) log('ACT LeRobot plan refreshed');
+      } catch (err) {
+        const out = document.getElementById('actPlanOutput');
+        if (out) out.textContent = `ERROR ACT plan: ${err.message}`;
+        if (writeLog) log(`ERROR ACT plan: ${err.message}`);
+      }
+    }
+
+    function renderLeRobotExportStatus(data) {
+      const pill = document.getElementById('lerobotExportPill');
+      const text = document.getElementById('lerobotExportText');
+      const out = document.getElementById('lerobotExportOutput');
+      if (!pill || !text || !out) return;
+      pill.classList.toggle('live', Boolean(data.running));
+      pill.classList.toggle('ok', !data.running && data.returncode === 0);
+      pill.classList.toggle('warn', !data.running && data.returncode !== 0);
+      text.textContent = data.running
+        ? `Export running PID ${data.pid}`
+        : (data.returncode === 0 ? 'Export complete' : 'Export idle');
+      const command = data.command ? `Command:\n${data.command}\n\n` : '';
+      out.textContent = `${data.message || ''}\n${data.output_root ? `Output: ${data.output_root}\n` : ''}${command}${data.output || ''}`.trim() || 'LeRobot export not started yet.';
+    }
+
+    async function refreshLeRobotExport(writeLog = false) {
+      try {
+        const data = await api('/api/lerobot_export/status');
+        renderLeRobotExportStatus(data);
+        if (writeLog) log(data.message);
+      } catch (err) {
+        const out = document.getElementById('lerobotExportOutput');
+        if (out) out.textContent = `ERROR LeRobot export: ${err.message}`;
+      }
+    }
+
+    async function startLeRobotExport() {
+      try {
+        const data = await api('/api/lerobot_export/start', actPayload());
+        renderLeRobotExportStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR LeRobot export: ${err.message}`);
+      }
+    }
+
+    async function refreshActReview(writeLog = false) {
+      try {
+        const data = await api('/api/act_review/status');
+        if (writeLog) log(data.message);
+        return data;
+      } catch (err) {
+        if (writeLog) log(`ERROR ACT review: ${err.message}`);
+        return null;
+      }
+    }
+
+    async function refreshAll(writeLog = false) {
+      try {
+        const arm = await api('/api/status');
+        const pill = document.getElementById('teachConnectionPill');
+        document.getElementById('teachConnectionText').textContent = arm.connected ? 'Connected' : 'Disconnected';
+        pill.className = 'status-pill ' + (arm.connected ? 'ok' : 'warn');
+        document.getElementById('startPoseState').textContent = arm.start_position_saved
+          ? `Saved · ${arm.start_position_label || 'ready'}`
+          : 'Not saved';
+        document.getElementById('payloadProfile').value = 'd405_follower';
+        document.getElementById('wristEffortSlider').value = 0;
+        document.getElementById('wristEffortValue').textContent = '0.00';
+        const cam = await api('/api/video/status');
+        cameraRunning = cam.running;
+        renderTeachCameraSources(cam.sources || [], cam.active_source);
+        activeTeachCameraSource = cam.active_source || selectedTeachCameraSource();
+        document.getElementById('cameraState').textContent = cam.sources.length
+          ? (cam.running ? `Active · ${cam.active_label}` : `${cam.sources.length} detected`)
+          : 'Not detected';
+        document.getElementById('cameraMode').value = 'color';
+        const trossenUi = await api('/api/trossen_ui/status');
+        const trossenUiState = document.getElementById('trossenUiState');
+        if (trossenUiState) {
+          trossenUiState.textContent = trossenUi.running
+            ? `Running PID ${trossenUi.pid}`
+            : (trossenUi.available ? 'Ready' : 'Not installed');
+        }
+        const rec = await api('/api/teach/status');
+        document.getElementById('recordState').textContent = rec.running ? 'Recording' : 'Stop';
+        document.getElementById('samples').textContent = rec.mode === 'high_smooth'
+          ? `${rec.motor_samples} motor / ${rec.samples} img`
+          : rec.samples;
+        document.getElementById('sessionDir').textContent = rec.session_dir || '-';
+        const replay = await api('/api/replay/status');
+        document.getElementById('replayState').textContent = replay.running
+          ? `${replay.frame_index}/${replay.frame_count}`
+          : 'Stop';
+        const dataset = await api('/api/dataset_capture/status');
+        document.getElementById('datasetState').textContent = dataset.running ? 'Capturing' : 'Idle';
+        const datasetIndicator = document.getElementById('datasetCaptureIndicator');
+        const datasetIndicatorText = document.getElementById('datasetCaptureIndicatorText');
+        if (datasetIndicator && datasetIndicatorText) {
+          datasetIndicator.classList.toggle('live', Boolean(dataset.running));
+          datasetIndicatorText.textContent = dataset.running ? 'Capture camera active' : 'Capture idle';
+        }
+        if (lastDatasetRunning && !dataset.running) {
+          log(dataset.message);
+          await loadRecordings(null, dataset.source_path, dataset.session_dir);
+        }
+        lastDatasetRunning = dataset.running;
+        document.getElementById('holdButton').textContent = arm.hold ? 'Hold off' : 'Hold';
+        updateCaptureSummary();
+        updateCameraLoop();
+        refreshActPlan(false);
+        refreshLeRobotExport(false);
+        if (writeLog) log('Status updated');
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function emergencyStop() {
+      try {
+        const data = await api('/api/emergency_stop', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR emergency: ${err.message}`);
+      }
+    }
+
+    function updateCameraLoop() {
+      const views = livePreviewViews();
+      if (cameraRunning && (selectedTeachCameraSource() || selectedFrontCameraSource())) {
+        views.forEach((view) => {
+          const enabled = cameraCaptureState[view.role] !== false;
+          view.img.style.display = enabled ? 'block' : 'none';
+          view.placeholder.style.display = enabled ? 'none' : 'block';
+          if (!enabled) {
+            view.img.src = '';
+            pendingFrames[view.role] = false;
+            view.placeholder.textContent = 'Disabled';
+          }
+        });
+        if (!cameraTimer) cameraTimer = setInterval(updateCameraFrame, 33);
+        updateCameraFrame();
+      } else {
+        views.forEach((view) => {
+          view.img.style.display = 'none';
+          view.placeholder.style.display = 'block';
+          view.placeholder.textContent = view.source ? 'Camera inactive' : 'No camera selected';
+        });
+        if (cameraTimer) {
+          clearInterval(cameraTimer);
+          cameraTimer = null;
+        }
+      }
+    }
+
+    function preferredTopCameraSource() {
+      const usb0 = teachCameraSources.find((source) => source.id === 'usb:0');
+      if (usb0) return usb0.id;
+      const brio = teachCameraSources.find((source) => String(source.label || '').toLowerCase().includes('brio'));
+      if (brio) return brio.id;
+      return teachCameraSources.length ? teachCameraSources[0].id : '';
+    }
+
+    function preferredFrontCameraSource(topSource = '') {
+      const front = teachCameraSources.find((source) => String(source.label || '').toLowerCase().includes('front'));
+      if (front && front.id !== topSource) return front.id;
+      const otherUsb = teachCameraSources.find((source) => source.id !== topSource && source.id.startsWith('usb:'));
+      if (otherUsb) return otherUsb.id;
+      return topSource || preferredTopCameraSource();
+    }
+
+    function teachCameraOptionLabel(source) {
+      if (source.id === 'usb:0') {
+        return `${source.label} · top cam par defaut`;
+      }
+      return source.label;
+    }
+
+    function renderTeachCameraSources(sources, activeSource) {
+      const select = document.getElementById('teachCameraSource');
+      const frontSelect = document.getElementById('frontCameraSource');
+      const previous = select.value;
+      const previousFront = frontSelect ? frontSelect.value : '';
+      teachCameraSources = Array.isArray(sources) ? sources : [];
+      select.innerHTML = '';
+      if (frontSelect) frontSelect.innerHTML = '';
+      if (teachCameraSources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        if (frontSelect) frontSelect.appendChild(option.cloneNode(true));
+        select.disabled = true;
+        if (frontSelect) frontSelect.disabled = true;
+        activeTeachCameraSource = '';
+        updateCaptureSummary();
+        return;
+      }
+      select.disabled = false;
+      if (frontSelect) frontSelect.disabled = false;
+      teachCameraSources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = teachCameraOptionLabel(source);
+        select.appendChild(option);
+        if (frontSelect) frontSelect.appendChild(option.cloneNode(true));
+      });
+      const savedSettings = loadCameraSettings();
+      const preferred = savedSettings.top_source || preferredTopCameraSource() || previous || activeSource;
+      const exists = teachCameraSources.some((source) => source.id === preferred);
+      select.value = exists ? preferred : preferredTopCameraSource();
+      if (frontSelect) {
+        const preferredFront = savedSettings.front_source || previousFront || preferredFrontCameraSource(select.value);
+        const frontExists = teachCameraSources.some((source) => source.id === preferredFront);
+        frontSelect.value = frontExists ? preferredFront : preferredFrontCameraSource(select.value);
+      }
+      activeTeachCameraSource = select.value;
+      saveCameraSettings();
+      updateCaptureSummary();
+    }
+
+    function selectedTeachCameraSource() {
+      const value = document.getElementById('teachCameraSource').value;
+      return teachCameraSources.some((source) => source.id === value) ? value : '';
+    }
+
+    function selectedFrontCameraSource() {
+      const value = document.getElementById('frontCameraSource')?.value;
+      return teachCameraSources.some((source) => source.id === value) ? value : '';
+    }
+
+    function cropRoleLabel(role) {
+      if (role === 'all') return 'All cameras';
+      if (role === 'top_view') return 'Top camera';
+      if (role === 'front') return 'Front camera';
+      if (role === 'wrist_rgb') return 'D405 RGB';
+      if (role === 'wrist_depth') return 'D405 depth';
+      return 'Click a preview';
+    }
+
+    function selectCropRole(role) {
+      const panel = document.getElementById('cropOutputPanel');
+      const shouldHide = panel && activeCropRole === role && !panel.classList.contains('hidden');
+      activeCropRole = role;
+      if (shouldHide) {
+        panel.classList.add('hidden');
+        ['top_view', 'front', 'wrist_rgb', 'wrist_depth'].forEach((candidate) => {
+          const elementId = candidate === 'top_view'
+            ? 'previewPanelTop'
+            : candidate === 'front'
+            ? 'previewPanelFront'
+            : candidate === 'wrist_rgb'
+            ? 'previewPanelWristRgb'
+            : 'previewPanelWristDepth';
+          const element = document.getElementById(elementId);
+          if (element) element.classList.remove('active');
+        });
+        updateCaptureSummary();
+        return;
+      }
+      if (panel) panel.classList.remove('hidden');
+
+      const topCamField = document.getElementById('topCameraSelectorField');
+      if (topCamField) {
+        topCamField.style.display = role === 'top_view' ? 'block' : 'none';
+      }
+      const frontCamField = document.getElementById('frontCameraSelectorField');
+      if (frontCamField) {
+        frontCamField.style.display = role === 'front' ? 'block' : 'none';
+      }
+
+      populateResolutions();
+
+      const captureEnabledCheckbox = document.getElementById('cameraCaptureEnabled');
+      if (captureEnabledCheckbox) {
+        captureEnabledCheckbox.checked = cameraCaptureState[role] !== false;
+      }
+
+      const enabled = document.getElementById('datasetCropEnabled');
+      if (enabled) enabled.checked = true;
+      ['top_view', 'front', 'wrist_rgb', 'wrist_depth'].forEach((candidate) => {
+        const elementId = candidate === 'top_view'
+          ? 'previewPanelTop'
+          : candidate === 'front'
+          ? 'previewPanelFront'
+          : candidate === 'wrist_rgb'
+          ? 'previewPanelWristRgb'
+          : 'previewPanelWristDepth';
+        const element = document.getElementById(elementId);
+        if (element) element.classList.toggle('active', candidate === role);
+      });
+      updateCaptureSummary();
+      updateCameraFrame();
+    }
+
+    function livePreviewViews() {
+      return [
+        {
+          source: selectedTeachCameraSource(),
+          role: 'top_view',
+          img: document.getElementById('cameraImageTop'),
+          placeholder: document.getElementById('cameraPlaceholderTop')
+        },
+        {
+          source: selectedFrontCameraSource(),
+          role: 'front',
+          img: document.getElementById('cameraImageFront'),
+          placeholder: document.getElementById('cameraPlaceholderFront')
+        },
+        {
+          source: 'd405:color',
+          role: 'wrist_rgb',
+          img: document.getElementById('cameraImageD405Rgb'),
+          placeholder: document.getElementById('cameraPlaceholderD405Rgb')
+        },
+        {
+          source: 'd405:depth',
+          role: 'wrist_depth',
+          img: document.getElementById('cameraImageD405Depth'),
+          placeholder: document.getElementById('cameraPlaceholderD405Depth')
+        }
+      ];
+    }
+
+    function cropQueryString(crop) {
+      if (!crop) return '';
+      const params = new URLSearchParams({
+        crop_enabled: '1',
+        crop_aspect: crop.aspect,
+        crop_zoom: String(crop.zoom),
+        crop_x: String(crop.offset_x),
+        crop_y: String(crop.offset_y)
+      });
+      return `&${params.toString()}`;
+    }
+
+    function selectedTeachCameraLabel() {
+      const sourceId = selectedTeachCameraSource();
+      const source = teachCameraSources.find((item) => item.id === sourceId);
+      return source ? source.label : (sourceId || 'None');
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+
+    function updateCaptureSummary() {
+      const preview = document.getElementById('captureParamPreview');
+      if (!preview) return;
+      const cropEnabled = Boolean(document.getElementById('datasetCropEnabled')?.checked);
+      const cropTarget = document.getElementById('datasetCropTarget')?.value || 'all';
+      const cropAspect = document.getElementById('datasetCropAspect')?.value || 'source';
+      const cropZoom = Number(document.getElementById('datasetCropZoom')?.value || 1).toFixed(2);
+      const cropX = Number(document.getElementById('datasetCropX')?.value || 0).toFixed(2);
+      const cropY = Number(document.getElementById('datasetCropY')?.value || 0).toFixed(2);
+      const replaySpeed = Number(document.getElementById('replaySpeed')?.value || 0.75).toFixed(2);
+      const taskName = document.getElementById('datasetTaskName')?.value.trim() || 'no task label';
+      const sourceName = selectedTeachCameraLabel();
+      const frontSource = selectedFrontCameraSource();
+      const frontSourceName = teachCameraSources.find((item) => item.id === frontSource)?.label || frontSource || 'None';
+      const cropText = cropEnabled
+        ? `${cropTarget}, ratio ${cropAspect}, zoom ${cropZoom}x, x ${cropX}, y ${cropY}`
+        : 'disabled';
+      preview.innerHTML = `
+        <div><strong>Top camera:</strong> ${cameraCaptureState.top_view ? escapeHtml(sourceName) + ' (' + resolutionState.top_view + ')' : 'disabled'}</div>
+        <div><strong>Front camera:</strong> ${cameraCaptureState.front ? escapeHtml(frontSourceName) + ' (' + resolutionState.front + ')' : 'disabled'}</div>
+        <div><strong>D405:</strong> ${cameraCaptureState.wrist_rgb ? 'RGB ' : ''}${cameraCaptureState.wrist_depth ? 'Depth' : ''}${!cameraCaptureState.wrist_rgb && !cameraCaptureState.wrist_depth ? 'disabled' : ''} (${resolutionState.d405})</div>
+        <div><strong>Selected crop preview:</strong> ${escapeHtml(cropRoleLabel(activeCropRole))}</div>
+        <div><strong>Crop:</strong> ${escapeHtml(cropText)}</div>
+        <div><strong>Replay:</strong> ${replaySpeed}x · task ${escapeHtml(taskName)}</div>
+        <div><strong>Output:</strong> ${Object.keys(cameraCaptureState).filter(k => cameraCaptureState[k]).join(' + ')} at 30 Hz, motor at 100 Hz</div>
+      `;
+      saveCameraSettings();
+    }
+
+    async function refreshTeachCameras(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderTeachCameraSources(data.sources || [], data.active_source);
+        activeTeachCameraSource = data.active_source || selectedTeachCameraSource();
+        document.getElementById('cameraState').textContent = data.sources.length
+          ? (data.running ? `Active · ${data.active_label}` : `${data.sources.length} detected`)
+          : 'Not detected';
+        if (writeLog) log(data.message);
+        updateCaptureSummary();
+        updateCameraLoop();
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning) return;
+      livePreviewViews().forEach((view) => {
+        if (!view.source || !view.img) return;
+        if (cameraCaptureState[view.role] === false) {
+          view.img.src = '';
+          view.img.style.display = 'none';
+          view.placeholder.style.display = 'block';
+          view.placeholder.textContent = 'Disabled';
+          pendingFrames[view.role] = false;
+          return;
+        }
+        if (pendingFrames[view.role]) return;
+        
+        pendingFrames[view.role] = true;
+        const cropQuery = cropQueryString(datasetCropConfig(view.role));
+        view.img.src = `/api/video/frame?source=${encodeURIComponent(view.source)}${cropQuery}&t=${Date.now()}`;
+      });
+    }
+
+    async function connectArm() {
+      try {
+        const data = await api('/api/connect', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function disconnectArm() {
+      try {
+        const data = await api('/api/disconnect', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function gravityCompensation() {
+      try {
+        const data = await api('/api/gravity_compensation', gravityPayload());
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function saveStartPosition() {
+      try {
+        const data = await api('/api/start_position/save', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR start position: ${err.message}`);
+      }
+    }
+
+    async function goToStartPosition() {
+      try {
+        const replay = await api('/api/replay/status');
+        if (replay.running) {
+          const stop = await api('/api/replay/stop', {});
+          log(stop.message);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        const data = await api('/api/start_position/go', {armed: document.getElementById('armed').checked});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR start position: ${err.message}`);
+      }
+    }
+
+    async function toggleHold() {
+      try {
+        const payload = gravityPayload();
+        payload.enabled = document.getElementById('holdButton').textContent === 'Hold';
+        const data = await api('/api/hold', payload);
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    async function gripper(effort) {
+      try {
+        const data = await api('/api/gripper', {effort, armed: document.getElementById('armed').checked});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR: ${err.message}`);
+      }
+    }
+
+    function gravityPayload() {
+      return {
+        armed: document.getElementById('armed').checked,
+        payload_profile: 'd405_follower',
+        camera_wrist_effort: 0
+      };
+    }
+
+    async function refreshTrossenUI(writeLog = false) {
+      try {
+        const data = await api('/api/trossen_ui/status');
+        const trossenUiState = document.getElementById('trossenUiState');
+        if (trossenUiState) {
+          trossenUiState.textContent = data.running
+            ? `Running PID ${data.pid}`
+            : (data.available ? 'Ready' : 'Not installed');
+        }
+        if (writeLog) log(data.message);
+      } catch (err) {
+        log(`ERROR Trossen UI: ${err.message}`);
+      }
+    }
+
+    async function startTrossenUI() {
+      try {
+        await api('/api/video/stop', {});
+        const data = await api('/api/trossen_ui/start', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR Trossen UI: ${err.message}`);
+      }
+    }
+
+    async function stopTrossenUI() {
+      try {
+        const data = await api('/api/trossen_ui/stop', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR Trossen UI: ${err.message}`);
+      }
+    }
+
+    function setGravityControls() {
+      const effort = Number(document.getElementById('wristEffortSlider').value);
+      document.getElementById('wristEffortValue').textContent = effort.toFixed(2);
+    }
+
+    async function startCamera() {
+      try {
+        const source = selectedTeachCameraSource();
+        const frontSource = selectedFrontCameraSource();
+        if (!source && !frontSource) {
+          log('ERROR camera: select a camera first');
+          return;
+        }
+        
+        const topRes = resolutionState.top_view || "640x480";
+        const frontRes = resolutionState.front || "640x480";
+        const d405Res = resolutionState.d405 || "640x480";
+        const [topW, topH] = topRes.split('x').map(Number);
+        const [frontW, frontH] = frontRes.split('x').map(Number);
+        const [d405W, d405H] = d405Res.split('x').map(Number);
+
+        if (cameraCaptureState.top_view && source && source.startsWith('usb:')) {
+          await api('/api/usb_cameras/start', {index: source.split(':')[1], width: topW, height: topH});
+        } else if (cameraCaptureState.top_view && source) {
+          await api('/api/video/start', {source, width: topW, height: topH});
+        }
+        if (cameraCaptureState.front && frontSource && frontSource.startsWith('usb:')) {
+          await api('/api/usb_cameras/start', {index: frontSource.split(':')[1], width: frontW, height: frontH});
+        }
+        if (cameraCaptureState.wrist_rgb || cameraCaptureState.wrist_depth) {
+          await api('/api/camera/start', {mode: 'color', width: d405W, height: d405H});
+        }
+        log(`Camera preview started. Top cam: ${topW}x${topH}, front: ${frontW}x${frontH}, D405: ${d405W}x${d405H}`);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function setCameraMode() {
+      if (!cameraRunning) return;
+      try {
+        const source = selectedTeachCameraSource();
+        if (!source) return;
+        await api('/api/video/start', {source});
+        updateCameraFrame();
+      } catch (err) {
+        log(`ERROR camera: ${err.message}`);
+      }
+    }
+
+    async function startRecording() {
+      try {
+        const gravityData = await api('/api/gravity_compensation', gravityPayload());
+        log(gravityData.message);
+        const payload = {
+          fps: 30,
+          camera_mode: 'color',
+          session_name: document.getElementById('sourceSessionName').value.trim(),
+          high_smooth: true,
+          with_camera: false
+        };
+        const data = await api('/api/teach/start', payload);
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR record: ${err.message}`);
+      }
+    }
+
+    async function stopRecording() {
+      try {
+        const data = await api('/api/teach/stop', {});
+        log(data.message);
+        await loadRecordings(data.session_dir, null, data.session_dir);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR record: ${err.message}`);
+      }
+    }
+
+    async function startReplay() {
+      const select = document.getElementById('recordingSelect');
+      if (!select.value) {
+        log('ERROR replay: select a recording');
+        return;
+      }
+      try {
+        const data = await api('/api/replay/start', {
+          path: select.value,
+          speed: Number(document.getElementById('replaySpeed').value),
+          armed: document.getElementById('armed').checked
+        });
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR replay: ${err.message}`);
+      }
+    }
+
+    async function stopReplay() {
+      try {
+        const data = await api('/api/replay/stop', {});
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR replay: ${err.message}`);
+      }
+    }
+
+    function datasetCropConfig(role) {
+      const enabled = document.getElementById('datasetCropEnabled').checked;
+      const rawTarget = document.getElementById('datasetCropTarget').value;
+      const target = ['all', 'usb', 'top', 'front', 'd405'].includes(rawTarget) ? rawTarget : 'all';
+      const applies = enabled && (
+        target === 'all'
+        || (target === 'usb' && (role === 'top_view' || role === 'front'))
+        || (target === 'top' && role === 'top_view')
+        || (target === 'front' && role === 'front')
+        || (target === 'd405' && role !== 'top_view' && role !== 'front')
+      );
+      if (!applies) return null;
+      return {
+        enabled: true,
+        aspect: document.getElementById('datasetCropAspect').value,
+        zoom: Number(document.getElementById('datasetCropZoom').value),
+        offset_x: Number(document.getElementById('datasetCropX').value),
+        offset_y: Number(document.getElementById('datasetCropY').value)
+      };
+    }
+
+    async function startDatasetCapture() {
+      const select = document.getElementById('recordingSelect');
+      if (!select.value) {
+        log('ERROR dataset: select a source movement');
+        return;
+      }
+      try {
+        const source = selectedTeachCameraSource();
+        const frontSource = selectedFrontCameraSource();
+        if (!source && !frontSource) {
+          log('ERROR dataset: select a capture camera');
+          return;
+        }
+        const data = await api('/api/dataset_capture/start', {
+          path: select.value,
+          speed: Number(document.getElementById('replaySpeed').value),
+          camera_mode: 'color',
+          video_source: source,
+          capture_sources: [
+            cameraCaptureState.top_view ? {source, role: 'top_view', crop: datasetCropConfig('top_view')} : null,
+            cameraCaptureState.front ? {source: frontSource, role: 'front', crop: datasetCropConfig('front')} : null,
+            cameraCaptureState.wrist_rgb ? {source: 'd405:color', role: 'wrist_rgb', crop: datasetCropConfig('wrist_rgb')} : null,
+            cameraCaptureState.wrist_depth ? {source: 'd405:depth', role: 'wrist_depth', crop: datasetCropConfig('wrist_depth')} : null
+          ].filter(Boolean),
+          task_name: document.getElementById('datasetTaskName').value.trim(),
+          dataset_profile: 'lerobot_act',
+          action_offset: 1,
+          lerobot_features: {
+            state: 'observation.state',
+            images: ['observation.images.top_view', 'observation.images.front', 'observation.images.wrist_rgb'],
+            action: 'nearest future motor state for ACT action chunking'
+          },
+          armed: document.getElementById('armed').checked
+        });
+        log(data.message);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR dataset: ${err.message}`);
+      }
+    }
+
+    async function stopDatasetCapture() {
+      try {
+        const data = await api('/api/dataset_capture/stop', {});
+        log(data.message);
+        await loadRecordings(null, null, data.session_dir);
+        await refreshAll(false);
+      } catch (err) {
+        log(`ERROR dataset: ${err.message}`);
+      }
+    }
+
+    function reviewOptionLabel(rec) {
+      const label = rec.capture_type === 'dataset_replay' ? 'dataset' : 'source';
+      const task = rec.task_name ? ` · ${rec.task_name}` : '';
+      const camera = rec.video_source ? ` · ${rec.video_source}` : '';
+      const fps = formatFpsLabel(rec.actual_camera_fps, rec.nominal_camera_fps);
+      const fpsText = fps ? ` · ${fps}` : '';
+      const motorFps = formatFpsLabel(rec.actual_motor_fps, rec.nominal_motor_fps);
+      const motorFpsText = motorFps ? ` · motor ${motorFps}` : '';
+      return rec.mode === 'high_smooth'
+        ? `${rec.name} · ${label}${task}${camera}${fpsText}${motorFpsText} (${rec.motor_samples} motor / ${rec.samples} img)`
+        : `${rec.name} · ${label}${task}${fpsText}${motorFpsText} (${rec.samples} samples)`;
+    }
+
+    async function loadRecordings(preferredDir = null, nextAfterSource = null, preferredReviewDir = null) {
+      try {
+        const data = await api('/api/recordings');
+        const allRecordings = data.recordings || [];
+        reviewRecordings = allRecordings;
+        recordings = allRecordings.filter((rec) => rec.capture_type !== 'dataset_replay');
+        const select = document.getElementById('recordingSelect');
+        select.innerHTML = '';
+        const reviewSelect = document.getElementById('reviewRecordingSelect');
+        reviewSelect.innerHTML = '';
+        let selectedIndex = 0;
+        recordings.forEach((rec, i) => {
+          const opt = document.createElement('option');
+          opt.value = rec.path;
+          opt.textContent = reviewOptionLabel(rec).replace('dataset', 'source');
+          select.appendChild(opt);
+          if (preferredDir && rec.path === preferredDir) selectedIndex = i;
+        });
+        let reviewIndex = 0;
+        reviewRecordings.forEach((rec, i) => {
+          const opt = document.createElement('option');
+          opt.value = rec.path;
+          opt.textContent = reviewOptionLabel(rec);
+          reviewSelect.appendChild(opt);
+          if (preferredReviewDir && rec.path === preferredReviewDir) reviewIndex = i;
+        });
+        if (recordings.length === 0) {
+          select.value = '';
+        } else {
+          if (nextAfterSource) {
+            const sourceIndex = recordings.findIndex(rec => rec.path === nextAfterSource);
+            selectedIndex = sourceIndex >= 0 ? sourceIndex : 0;
+          } else if (!preferredDir) {
+            selectedIndex = 0;
+          }
+          select.selectedIndex = Math.min(selectedIndex, recordings.length - 1);
+        }
+        if (reviewRecordings.length === 0) {
+          stopReviewPlayback(false);
+          selectedRecording = null;
+          reviewFrames = [];
+          reviewSelect.value = '';
+          renderReviewEmpty('No recording yet.');
+          return;
+        }
+        if (!preferredReviewDir) {
+          const latestDatasetIndex = reviewRecordings.findIndex((rec) => rec.capture_type === 'dataset_replay');
+          reviewIndex = latestDatasetIndex >= 0 ? latestDatasetIndex : 0;
+        }
+        reviewSelect.selectedIndex = Math.min(reviewIndex, reviewRecordings.length - 1);
+        await loadReviewRecording();
+      } catch (err) {
+        log(`ERROR review: ${err.message}`);
+      }
+    }
+
+    async function loadSelectedRecording() {
+      const select = document.getElementById('recordingSelect');
+      if (!select.value) return;
+      const reviewSelect = document.getElementById('reviewRecordingSelect');
+      if (reviewSelect && reviewSelect.value !== select.value) {
+        reviewSelect.value = select.value;
+      }
+      await loadReviewRecording();
+    }
+
+    async function loadReviewRecording() {
+      const select = document.getElementById('reviewRecordingSelect');
+      if (!select.value) return;
+      try {
+        stopReviewPlayback(false);
+        const data = await api('/api/recording/load', {path: select.value});
+        selectedRecording = data;
+        reviewFrames = data.frames;
+        reviewIndex = 0;
+        const slider = document.getElementById('frameSlider');
+        slider.max = Math.max(0, reviewFrames.length - 1);
+        slider.value = 0;
+        showFrame(0);
+      } catch (err) {
+        log(`ERROR review: ${err.message}`);
+      }
+    }
+
+    function formatReviewTime(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+      const minutes = Math.floor(seconds / 60);
+      const wholeSeconds = Math.floor(seconds % 60);
+      return `${minutes}:${String(wholeSeconds).padStart(2, '0')}`;
+    }
+
+    function formatFpsLabel(actual, nominal = null) {
+      const actualNumber = Number(actual);
+      const nominalNumber = Number(nominal);
+      if (!Number.isFinite(actualNumber) || actualNumber <= 0) {
+        return Number.isFinite(nominalNumber) && nominalNumber > 0 ? `${nominalNumber.toFixed(0)} FPS target` : '';
+      }
+      const actualText = actualNumber >= 10 ? actualNumber.toFixed(1) : actualNumber.toFixed(2);
+      if (Number.isFinite(nominalNumber) && nominalNumber > 0) {
+        return `${actualText}/${nominalNumber.toFixed(0)} FPS`;
+      }
+      return `${actualText} FPS`;
+    }
+
+    function frameTime(index) {
+      if (!reviewFrames.length) return 0;
+      const first = Number(reviewFrames[0].timestamp);
+      const current = Number(reviewFrames[Math.max(0, Math.min(index, reviewFrames.length - 1))].timestamp);
+      if (!Number.isFinite(first) || !Number.isFinite(current)) return index / 30;
+      return Math.max(0, current - first);
+    }
+
+    function recordingDuration() {
+      if (reviewFrames.length < 2) return 0;
+      return frameTime(reviewFrames.length - 1);
+    }
+
+    function updateReviewPlaybackState() {
+      const state = document.getElementById('reviewPlaybackState');
+      const current = formatReviewTime(frameTime(reviewIndex));
+      const total = formatReviewTime(recordingDuration());
+      state.textContent = `${current} / ${total} · frame ${reviewFrames.length ? reviewIndex + 1 : 0}/${reviewFrames.length}`;
+    }
+
+    function toggleReviewPlayback() {
+      if (reviewPlaying) {
+        stopReviewPlayback(false);
+        return;
+      }
+      startReviewPlayback();
+    }
+
+    function startReviewPlayback() {
+      if (!selectedRecording || reviewFrames.length === 0) {
+        log('ERROR review: no recording to play');
+        return;
+      }
+      if (reviewIndex >= reviewFrames.length - 1) showFrame(0);
+      reviewPlaying = true;
+      document.getElementById('reviewPlayButton').textContent = 'Pause';
+      scheduleNextReviewFrame();
+    }
+
+    function stopReviewPlayback(reset) {
+      if (reviewPlaybackTimer) {
+        clearTimeout(reviewPlaybackTimer);
+        reviewPlaybackTimer = null;
+      }
+      reviewPlaying = false;
+      const button = document.getElementById('reviewPlayButton');
+      if (button) button.textContent = 'Play';
+      if (reset && reviewFrames.length) showFrame(0);
+      else updateReviewPlaybackState();
+    }
+
+    function scheduleNextReviewFrame() {
+      if (!reviewPlaying) return;
+      if (reviewIndex >= reviewFrames.length - 1) {
+        stopReviewPlayback(false);
+        return;
+      }
+      const current = Number(reviewFrames[reviewIndex].timestamp);
+      const next = Number(reviewFrames[reviewIndex + 1].timestamp);
+      let delayMs = Number.isFinite(current) && Number.isFinite(next)
+        ? (next - current) * 1000
+        : 33;
+      if (!Number.isFinite(delayMs) || delayMs <= 0) delayMs = 33;
+      delayMs = Math.max(15, Math.min(delayMs, 250));
+      reviewPlaybackTimer = setTimeout(() => {
+        showFrame(reviewIndex + 1);
+        scheduleNextReviewFrame();
+      }, delayMs);
+    }
+
+    function showFrame(index) {
+      if (!selectedRecording || reviewFrames.length === 0) {
+        renderReviewEmpty('No frame');
+        return;
+      }
+      reviewIndex = Math.max(0, Math.min(index, reviewFrames.length - 1));
+      const frame = reviewFrames[reviewIndex];
+      const topImg = document.getElementById('reviewImageTop');
+      const topPlaceholder = document.getElementById('reviewPlaceholderTop');
+      const frontImg = document.getElementById('reviewImageFront');
+      const frontPlaceholder = document.getElementById('reviewPlaceholderFront');
+      const wristRgbImg = document.getElementById('reviewImageWristRgb');
+      const wristRgbPlaceholder = document.getElementById('reviewPlaceholderWristRgb');
+      const wristDepthImg = document.getElementById('reviewImageWristDepth');
+      const wristDepthPlaceholder = document.getElementById('reviewPlaceholderWristDepth');
+      const images = frame.images || {};
+      const topImage = images.top_view || null;
+      const frontImage = images.front || null;
+      const wristRgbImage = images.wrist_rgb || null;
+      const wristDepthImage = images.wrist_depth || null;
+      if (topImage) {
+        topImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(topImage)}&t=${Date.now()}`;
+        topImg.style.display = 'block';
+        topPlaceholder.style.display = 'none';
+      } else {
+        topImg.style.display = 'none';
+        topPlaceholder.style.display = 'block';
+        topPlaceholder.textContent = 'No top-view image';
+      }
+      if (frontImage) {
+        frontImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(frontImage)}&t=${Date.now()}`;
+        frontImg.style.display = 'block';
+        frontPlaceholder.style.display = 'none';
+      } else {
+        frontImg.style.display = 'none';
+        frontPlaceholder.style.display = 'block';
+        frontPlaceholder.textContent = 'No front image';
+      }
+      if (wristRgbImage) {
+        wristRgbImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(wristRgbImage)}&t=${Date.now()}`;
+        wristRgbImg.style.display = 'block';
+        wristRgbPlaceholder.style.display = 'none';
+      } else {
+        wristRgbImg.style.display = 'none';
+        wristRgbPlaceholder.style.display = 'block';
+        wristRgbPlaceholder.textContent = 'No wrist-RGB image';
+      }
+      if (wristDepthImage) {
+        wristDepthImg.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(wristDepthImage)}&t=${Date.now()}`;
+        wristDepthImg.style.display = 'block';
+        wristDepthPlaceholder.style.display = 'none';
+      } else {
+        wristDepthImg.style.display = 'none';
+        wristDepthPlaceholder.style.display = 'block';
+        wristDepthPlaceholder.textContent = 'No wrist-depth image';
+      }
+      document.getElementById('frameSlider').value = reviewIndex;
+      const gripperText = frame.gripper_position == null
+        ? 'gripper n/a'
+        : `gripper ${Number(frame.gripper_position).toFixed(4)} m`;
+      const syncText = frame.motor_index == null
+        ? 'sync n/a'
+        : `sync motor ${frame.motor_index}`;
+      const metadata = selectedRecording.metadata || {};
+      const taskText = metadata.task_name ? ` · task ${metadata.task_name}` : '';
+      const cameraText = metadata.video_source ? ` · camera ${metadata.video_source}` : '';
+      const fpsText = formatFpsLabel(selectedRecording.actual_camera_fps, selectedRecording.nominal_camera_fps);
+      const fpsMeta = fpsText ? ` · camera ${fpsText}` : '';
+      const motorFpsText = formatFpsLabel(selectedRecording.actual_motor_fps, selectedRecording.nominal_motor_fps);
+      const motorFpsMeta = motorFpsText ? ` · motor ${motorFpsText}` : '';
+      document.getElementById('reviewMeta').textContent =
+        `${selectedRecording.name}${taskText}${cameraText}${fpsMeta}${motorFpsMeta} · frame ${reviewIndex + 1}/${reviewFrames.length} · ${syncText} · ${gripperText} · qpos ${frame.qpos.map(v => Number(v).toFixed(2)).join(', ')}`;
+      updateReviewPlaybackState();
+    }
+
+    function renderReviewEmpty(message) {
+      stopReviewPlayback(false);
+      document.getElementById('reviewImageTop').style.display = 'none';
+      document.getElementById('reviewPlaceholderTop').style.display = 'block';
+      document.getElementById('reviewPlaceholderTop').textContent = message;
+      document.getElementById('reviewImageFront').style.display = 'none';
+      document.getElementById('reviewPlaceholderFront').style.display = 'block';
+      document.getElementById('reviewPlaceholderFront').textContent = message;
+      document.getElementById('reviewImageWristRgb').style.display = 'none';
+      document.getElementById('reviewPlaceholderWristRgb').style.display = 'block';
+      document.getElementById('reviewPlaceholderWristRgb').textContent = message;
+      document.getElementById('reviewImageWristDepth').style.display = 'none';
+      document.getElementById('reviewPlaceholderWristDepth').style.display = 'block';
+      document.getElementById('reviewPlaceholderWristDepth').textContent = message;
+      document.getElementById('reviewMeta').textContent = '';
+      updateReviewPlaybackState();
+    }
+
+    function stepFrame(delta) {
+      stopReviewPlayback(false);
+      showFrame(reviewIndex + delta);
+    }
+
+    async function nextSourceRecording() {
+      const select = document.getElementById('recordingSelect');
+      if (select.options.length === 0) return;
+      select.selectedIndex = Math.min(select.selectedIndex + 1, select.options.length - 1);
+      await loadSelectedRecording();
+    }
+
+    async function previousSourceRecording() {
+      const select = document.getElementById('recordingSelect');
+      if (select.options.length === 0) return;
+      select.selectedIndex = Math.max(select.selectedIndex - 1, 0);
+      await loadSelectedRecording();
+    }
+
+    async function nextRecording() {
+      const select = document.getElementById('reviewRecordingSelect');
+      if (select.options.length === 0) return;
+      select.selectedIndex = Math.min(select.selectedIndex + 1, select.options.length - 1);
+      await loadReviewRecording();
+    }
+
+    async function previousRecording() {
+      const select = document.getElementById('reviewRecordingSelect');
+      if (select.options.length === 0) return;
+      select.selectedIndex = Math.max(select.selectedIndex - 1, 0);
+      await loadReviewRecording();
+    }
+
+    async function deleteRecording() {
+      const select = document.getElementById('reviewRecordingSelect');
+      if (!select.value) return;
+      if (!confirm('Delete this recording?')) return;
+      try {
+        const nextIndex = Math.max(0, select.selectedIndex - 1);
+        const data = await api('/api/recording/delete', {path: select.value});
+        log(data.message);
+        selectedRecording = null;
+        reviewFrames = [];
+        renderReviewEmpty('Recording deleted');
+        await loadRecordings();
+        const refreshed = document.getElementById('reviewRecordingSelect');
+        if (refreshed.options.length > 0) {
+          refreshed.selectedIndex = Math.min(nextIndex, refreshed.options.length - 1);
+          await loadReviewRecording();
+        }
+      } catch (err) {
+        log(`ERROR review: ${err.message}`);
+      }
+    }
+
+    async function clearRecordings() {
+      if (!confirm('Delete all recordings?')) return;
+      try {
+        const data = await api('/api/recordings/clear', {});
+        log(data.message);
+        selectedRecording = null;
+        reviewFrames = [];
+        const select = document.getElementById('recordingSelect');
+        select.innerHTML = '';
+        renderReviewEmpty('No recording');
+        await loadRecordings();
+      } catch (err) {
+        log(`ERROR review: ${err.message}`);
+      }
+    }
+
+    function openMonitor() {
+      window.open('http://127.0.0.1:7865', '_blank');
+    }
+
+    async function openActReview() {
+      try {
+        const data = await api('/api/act_review/start', actPayload());
+        log(data.message);
+        window.open(data.url || 'http://127.0.0.1:7866', '_blank');
+      } catch (err) {
+        log(`ERROR ACT review: ${err.message}`);
+      }
+    }
+
+    applyCameraSettings();
+    refreshAll();
+    loadRecordings();
+    refreshActPlan(false);
+    refreshLeRobotExport(false);
+    setInterval(() => refreshAll(false), 1500);
+  </script>
+</body>
+</html>

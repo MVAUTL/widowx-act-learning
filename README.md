@@ -36,7 +36,34 @@ Large local artifacts are intentionally ignored by Git:
 
 ## Setup
 
+Create the local Python environment used by the control UI:
+
 ```bash
+python3.10 -m venv .venv-trossen-ui
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
+.venv-trossen-ui/bin/python -m pip install -r requirements.txt
+```
+
+Verify that the Trossen driver installed correctly:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.robot.widowx_demo --check-import
+```
+
+Expected output includes:
+
+```text
+trossen_arm import OK
+Model wxai_v0 OK: True
+```
+
+If `python3.10` is not available but `pyenv` is installed:
+
+```bash
+pyenv install 3.10.12
+pyenv local 3.10.12
+python -m venv .venv-trossen-ui
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
 .venv-trossen-ui/bin/python -m pip install -r requirements.txt
 ```
 
