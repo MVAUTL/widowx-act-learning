@@ -70,6 +70,9 @@ TEACH_HTML = (Path(__file__).resolve().parent / "pages" / "teach.html").read_tex
 HAMSTER_HTML = (Path(__file__).resolve().parent / "pages" / "hamster.html").read_text(encoding="utf-8")
 
 
+DATASET_TRIM_HTML = (Path(__file__).resolve().parent / "pages" / "dataset_trim.html").read_text(encoding="utf-8")
+
+
 class CameraController:
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -1002,13 +1005,37 @@ class RecordingLibrary:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
 
+    def _resolve_root(self, raw_root: str | None = None) -> Path:
+        if not raw_root:
+            return self.root
+        path = Path(raw_root).expanduser()
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        resolved = path.resolve()
+        home_root = Path.home().resolve()
+        inside_allowed_root = any(
+            resolved == allowed_root or allowed_root in resolved.parents
+            for allowed_root in (PROJECT_ROOT, home_root)
+        )
+        if not inside_allowed_root:
+            raise RuntimeError("Dataset source folder must be inside your home or project directory.")
+        if not resolved.exists() or not resolved.is_dir():
+            raise RuntimeError("Dataset source folder not found.")
+        return resolved
+
     def _resolve_session(self, raw_path: str) -> Path:
         path = Path(raw_path)
         if not path.is_absolute():
             path = self.root / path
         resolved = path.resolve()
-        if resolved != self.root and self.root not in resolved.parents:
-            raise RuntimeError("Recording path is outside the recordings directory.")
+        inside_default_root = resolved == self.root or self.root in resolved.parents
+        home_root = Path.home().resolve()
+        inside_allowed_root = any(
+            resolved == allowed_root or allowed_root in resolved.parents
+            for allowed_root in (PROJECT_ROOT, home_root)
+        )
+        if not inside_default_root and not inside_allowed_root:
+            raise RuntimeError("Recording path is outside your home or project directory.")
         if not resolved.exists() or not resolved.is_dir():
             raise RuntimeError("Recording session not found.")
         return resolved
@@ -1043,10 +1070,39 @@ class RecordingLibrary:
                 timestamps.append(timestamp)
         return count, timestamps
 
-    def list(self) -> dict[str, Any]:
-        self.root.mkdir(parents=True, exist_ok=True)
+    @staticmethod
+    def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        if not path.exists():
+            return rows
+        with path.open(encoding="utf-8") as file:
+            for line in file:
+                if line.strip():
+                    rows.append(json.loads(line))
+        return rows
+
+    @staticmethod
+    def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+        with path.open("w", encoding="utf-8") as file:
+            for row in rows:
+                file.write(json.dumps(row) + "\n")
+
+    @staticmethod
+    def _safe_session_name(raw_name: Any, fallback: str) -> str:
+        name = str(raw_name or fallback).strip()
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        cleaned = "".join(ch if ch in allowed else "_" for ch in name)
+        return cleaned.strip("._-") or fallback
+
+    def list(self, root: str | None = None) -> dict[str, Any]:
+        source_root = self._resolve_root(root)
+        source_root.mkdir(parents=True, exist_ok=True)
         recordings = []
-        for session in sorted(self.root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        root_is_session = (source_root / "samples.jsonl").exists() or (source_root / "motor_samples.jsonl").exists()
+        sessions = [source_root] if root_is_session else sorted(
+            source_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+        for session in sessions:
             if not session.is_dir():
                 continue
             samples_path = session / "samples.jsonl"
@@ -1091,7 +1147,7 @@ class RecordingLibrary:
                     "source_recording": metadata.get("source_recording"),
                 }
             )
-        return {"ok": True, "recordings": recordings}
+        return {"ok": True, "root": str(source_root), "default_root": str(self.root), "recordings": recordings}
 
     def load(self, payload: dict[str, Any]) -> dict[str, Any]:
         session = self._resolve_session(str(payload.get("path", "")))
@@ -1212,6 +1268,123 @@ class RecordingLibrary:
         if not image.exists() or not image.is_file():
             raise RuntimeError("Recording image not found.")
         return image.read_bytes()
+
+    def trim(self, payload: dict[str, Any]) -> dict[str, Any]:
+        session = self._resolve_session(str(payload.get("path", "")))
+        output_root = self._resolve_root(str(payload.get("source_root") or session.parent))
+        samples_path = session / "samples.jsonl"
+        motor_path = session / "motor_samples.jsonl"
+        samples = self._read_jsonl(samples_path)
+        motor = self._read_jsonl(motor_path)
+        source_rows = samples or motor
+        if not source_rows:
+            raise RuntimeError("Selected recording has no samples to trim.")
+
+        cut_start = int(payload.get("cut_start") or 0)
+        cut_end = int(payload.get("cut_end") or 0)
+        if cut_start < 0 or cut_end < 0:
+            raise RuntimeError("Trim values must be >= 0.")
+        keep_start = cut_start
+        keep_end = len(source_rows) - cut_end
+        if keep_start >= keep_end:
+            raise RuntimeError(
+                f"Trim removes all frames: total={len(source_rows)}, first={cut_start}, last={cut_end}."
+            )
+
+        default_name = f"{session.name}_trim_{cut_start}_{cut_end}"
+        output_name = self._safe_session_name(payload.get("output_name"), default_name)
+        output = (output_root / output_name).resolve()
+        if output.exists():
+            suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output = (output_root / f"{output_name}_{suffix}").resolve()
+        if output != output_root and output_root not in output.parents:
+            raise RuntimeError("Trim output path is outside the selected source folder.")
+        output.mkdir(parents=True)
+
+        metadata_path = session / "metadata.json"
+        metadata: dict[str, Any] = {}
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                metadata = {}
+        metadata.update(
+            {
+                "source_recording": str(session),
+                "trim_source_recording": str(session),
+                "trim_first_frames": cut_start,
+                "trim_last_frames": cut_end,
+                "trim_original_samples": len(samples),
+                "trim_original_motor_samples": len(motor),
+                "trim_created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        (output / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        if samples:
+            kept_samples = [dict(row) for row in samples[keep_start:keep_end]]
+            old_motor_indices = []
+            for row in kept_samples:
+                try:
+                    motor_index = int(row.get("motor_index"))
+                except (TypeError, ValueError):
+                    continue
+                if motor_index >= 0:
+                    old_motor_indices.append(motor_index)
+            motor_offset = min(old_motor_indices) if old_motor_indices else 0
+            motor_keep_end = max(old_motor_indices) + 2 if old_motor_indices else len(motor)
+            motor_keep_end = min(max(motor_keep_end, motor_offset), len(motor))
+            kept_motor = [dict(row) for row in motor[motor_offset:motor_keep_end]] if motor else []
+            old_to_new_motor = {}
+            for new_index, row in enumerate(kept_motor):
+                old_index = int(row.get("index", motor_offset + new_index))
+                old_to_new_motor[old_index] = new_index
+                row["index"] = new_index
+            for new_index, row in enumerate(kept_samples):
+                row["index"] = new_index
+                old_motor = row.get("motor_index")
+                if old_motor is not None:
+                    try:
+                        row["motor_index"] = old_to_new_motor.get(int(old_motor), max(0, int(old_motor) - motor_offset))
+                    except (TypeError, ValueError):
+                        pass
+                self._copy_sample_images(session, output, row)
+            self._write_jsonl(output / "samples.jsonl", kept_samples)
+            if kept_motor:
+                self._write_jsonl(output / "motor_samples.jsonl", kept_motor)
+        else:
+            kept_motor = [dict(row) for row in motor[keep_start:keep_end]]
+            for new_index, row in enumerate(kept_motor):
+                row["index"] = new_index
+            self._write_jsonl(output / "motor_samples.jsonl", kept_motor)
+
+        return {
+            "ok": True,
+            "source": str(session),
+            "session_dir": str(output),
+            "message": f"Created trimmed dataset {output.name}",
+            "kept_frames": keep_end - keep_start,
+            "removed_start": cut_start,
+            "removed_end": cut_end,
+        }
+
+    @staticmethod
+    def _copy_sample_images(source_session: Path, output_session: Path, row: dict[str, Any]) -> None:
+        image_refs = set()
+        image = row.get("image")
+        if image:
+            image_refs.add(str(image))
+        images = row.get("images")
+        if isinstance(images, dict):
+            image_refs.update(str(value) for value in images.values() if value)
+        for rel_path in image_refs:
+            source = (source_session / rel_path).resolve()
+            if not source.exists() or source_session not in source.parents:
+                continue
+            dest = output_session / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists():
+                shutil.copy2(source, dest)
 
     def delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         session = self._resolve_session(str(payload.get("path", "")))
@@ -2751,6 +2924,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(HAMSTER_HTML.encode("utf-8"))
             return
+        if parsed.path == "/dataset-trim":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(DATASET_TRIM_HTML.encode("utf-8"))
+            return
         if parsed.path == "/api/status":
             self.send_json(self.controller.status())
             return
@@ -2776,7 +2955,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_json(self.trossen_ui_runner.status())
             return
         if parsed.path == "/api/recordings":
-            self.send_json(self.recording_library.list())
+            query = parse_qs(parsed.query)
+            root = query.get("root", [""])[0]
+            self.send_json(self.recording_library.list(root or None))
             return
         if parsed.path == "/api/act_dataset/plan":
             self.send_json(self.act_dataset_planner.plan())
@@ -2892,6 +3073,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "/api/act_review/start": lambda: self.act_review_runner.start(payload),
                 "/api/hamster/send_camera": lambda: self.hamster_service.send_camera(payload),
                 "/api/recording/load": lambda: self.recording_library.load(payload),
+                "/api/recording/trim": lambda: self.recording_library.trim(payload),
                 "/api/recording/delete": lambda: self.recording_library.delete(payload),
                 "/api/recordings/clear": self.recording_library.clear,
                 "/api/emergency_stop": self.emergency_stop,
