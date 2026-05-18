@@ -92,6 +92,11 @@
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 8px;
     }
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
     .preview-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -153,7 +158,7 @@
     @media (max-width: 900px) {
       header { align-items: stretch; flex-direction: column; }
       .layout { grid-template-columns: 1fr; }
-      .preview-grid, .grid, .folder-row { grid-template-columns: 1fr; }
+      .preview-grid, .grid, .folder-row, .action-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -225,7 +230,11 @@
           <label>New dataset folder name</label>
           <input id="outputName" type="text" placeholder="auto: source_trim_first_last">
         </div>
-        <button class="primary" onclick="createTrimmedDataset()">Create trimmed dataset</button>
+        <div class="action-row">
+          <button onclick="autoDetectStillFrames()">Auto detect still frames</button>
+          <button class="primary" onclick="autoCutStillFrames()">Auto cut + create</button>
+        </div>
+        <button class="primary" style="width:100%; margin-top:8px" onclick="createTrimmedDataset()">Create with current values</button>
         <div class="note" style="margin-top:12px">
           The new recording is written inside the selected source folder. It keeps the same metadata and images, but removes the selected start/end frames and remaps motor indices for ACT conversion.
         </div>
@@ -239,6 +248,8 @@
     let frames = [];
     let frameIndex = 0;
     let activeSourceRoot = '';
+    const STILL_DELTA_RAD = 0.003;
+    const STILL_KEEP_BUFFER_FRAMES = 2;
 
     async function api(path, payload = null) {
       const opts = payload ? {
@@ -327,6 +338,64 @@
         slider.value = start;
         showFrame(start);
       }
+    }
+
+    function maxJointDelta(a, b) {
+      if (!Array.isArray(a?.qpos) || !Array.isArray(b?.qpos)) return Infinity;
+      const count = Math.min(a.qpos.length, b.qpos.length);
+      if (!count) return Infinity;
+      let delta = 0;
+      for (let i = 0; i < count; i += 1) {
+        const av = Number(a.qpos[i]);
+        const bv = Number(b.qpos[i]);
+        if (!Number.isFinite(av) || !Number.isFinite(bv)) return Infinity;
+        delta = Math.max(delta, Math.abs(bv - av));
+      }
+      return delta;
+    }
+
+    function detectStationaryTrim() {
+      if (frames.length < 3) throw new Error('Need at least 3 frames to auto-detect still sections.');
+      let firstMotion = -1;
+      let lastMotion = -1;
+      for (let i = 1; i < frames.length; i += 1) {
+        if (maxJointDelta(frames[i - 1], frames[i]) > STILL_DELTA_RAD) {
+          if (firstMotion < 0) firstMotion = i;
+          lastMotion = i;
+        }
+      }
+      if (firstMotion < 0 || lastMotion < 0) {
+        throw new Error('No robot motion detected from qpos. Nothing was cut.');
+      }
+      const cutStart = Math.max(0, firstMotion - STILL_KEEP_BUFFER_FRAMES);
+      const keepEndIndex = Math.min(frames.length - 1, lastMotion + STILL_KEEP_BUFFER_FRAMES);
+      const cutEnd = Math.max(0, frames.length - 1 - keepEndIndex);
+      if (cutStart + cutEnd >= frames.length) {
+        throw new Error('Auto-cut would remove all frames. Nothing was cut.');
+      }
+      return {cutStart, cutEnd};
+    }
+
+    function autoDetectStillFrames() {
+      try {
+        const {cutStart, cutEnd} = detectStationaryTrim();
+        document.getElementById('cutStart').value = cutStart;
+        document.getElementById('cutEnd').value = cutEnd;
+        if (selectedRecording) {
+          document.getElementById('outputName').value = `${selectedRecording.name}_autocut`;
+        }
+        updateTrimPreview();
+        document.getElementById('output').textContent =
+          `Auto-detected still frames\ncut first: ${cutStart}\ncut last: ${cutEnd}\nkept: ${frames.length - cutStart - cutEnd}`;
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR auto detect: ${err.message}`;
+      }
+    }
+
+    async function autoCutStillFrames() {
+      autoDetectStillFrames();
+      if (document.getElementById('output').textContent.startsWith('ERROR')) return;
+      await createTrimmedDataset();
     }
 
     function firstImage(frame) {
