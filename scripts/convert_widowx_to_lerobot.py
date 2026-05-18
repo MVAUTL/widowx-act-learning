@@ -63,12 +63,27 @@ def _load_image(path: Path) -> np.ndarray:
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
 
 
-def _find_sessions(root: Path, limit: int | None) -> list[Path]:
-    sessions = [
-        path
-        for path in sorted(root.glob("dataset_*"))
-        if path.is_dir() and (path / "samples.jsonl").exists() and (path / "motor_samples.jsonl").exists()
-    ]
+def _valid_session(path: Path) -> bool:
+    return path.is_dir() and (path / "samples.jsonl").exists() and (path / "motor_samples.jsonl").exists()
+
+
+def _find_sessions(root: Path, limit: int | None, selected: str | None = None) -> list[Path]:
+    selected_names = {name.strip() for name in str(selected or "").split(",") if name.strip()}
+    if selected_names:
+        sessions = []
+        for name in selected_names:
+            candidate = root if name in {".", root.name} and _valid_session(root) else (root / name).resolve()
+            if root not in candidate.parents and candidate != root:
+                raise RuntimeError(f"Session is outside source root: {name}")
+            if not _valid_session(candidate):
+                raise RuntimeError(f"Selected WidowX dataset session not found: {candidate}")
+            sessions.append(candidate)
+    else:
+        sessions = [root] if _valid_session(root) else [
+            path
+            for path in sorted(root.iterdir())
+            if _valid_session(path)
+        ]
     if limit is not None:
         sessions = sessions[:limit]
     if not sessions:
@@ -102,7 +117,7 @@ def _import_lerobot_dataset():
 def convert(args: argparse.Namespace) -> None:
     source_root = Path(args.source_root).expanduser().resolve()
     output_root = Path(args.output_root).expanduser().resolve()
-    sessions = _find_sessions(source_root, args.max_episodes)
+    sessions = _find_sessions(source_root, args.max_episodes, args.sessions)
 
     if output_root.exists() and args.overwrite:
         shutil.rmtree(output_root)
@@ -209,6 +224,7 @@ def main() -> int:
     parser.add_argument("--cameras", default="top_view,wrist_rgb")
     parser.add_argument("--action-offset", type=int, default=1)
     parser.add_argument("--max-episodes", type=int, default=None)
+    parser.add_argument("--sessions", default=None, help="Comma-separated session folder names under --source-root.")
     parser.add_argument("--use-videos", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--image-writer-threads", type=int, default=4)
     parser.add_argument("--image-writer-processes", type=int, default=0)
