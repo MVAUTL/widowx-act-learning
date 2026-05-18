@@ -148,6 +148,12 @@ Start the web interface for the real arm:
 .venv-trossen-ui/bin/python -m widowx_ai.apps.interface --real --ip 192.168.1.2 --variant base --port 7862
 ```
 
+Start the Cartesian end-effector target test UI:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.robot.cartesian_test_ui --real --ip 192.168.1.2 --variant base --port 7866
+```
+
 Train an ACT-style policy from local recordings:
 
 ```bash
@@ -303,6 +309,15 @@ Cancel only your own job:
 scancel <JOB_ID>
 ```
 
+### Download trained models
+
+After training is complete, download the trained model to your local machine for inference. You only need the `pretrained_model` folder from the latest checkpoint to save disk space.
+
+```bash
+# Provide the password when prompted (ftlab2025)
+rsync -avzP -e 'ssh -o StrictHostKeyChecking=no' guest@192.168.100.36:~/intern_matteo_vulliez/widowx_act_current/outputs/train/<JOB_NAME>/checkpoints/last/pretrained_model/ widowx_ai/models/<JOB_NAME>/
+```
+
 More DGX/HAMSTER notes are in
 [`docs/hamster_dgx_spark.fr.md`](docs/hamster_dgx_spark.fr.md).
 
@@ -371,3 +386,9 @@ scancel <JOB_ID>
 Once HAMSTER is running, the local control UI can call it from:
 
 ```text
+http://127.0.0.1:7862/hamster
+```
+
+The local page sends the selected camera frame to the DGX backend at
+`http://192.168.100.36:8000` and displays the returned trajectory plus an
+annotated output image.
