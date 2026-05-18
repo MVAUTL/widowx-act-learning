@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WidowX Dataset Trim</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c20;
+      --panel-2: #20262b;
+      --text: #eef2f4;
+      --muted: #a6b0b8;
+      --accent: #37c48d;
+      --danger: #e45858;
+      --line: #2d363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.05; font-weight: 720; }
+    .sub { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .nav { display: flex; flex-wrap: wrap; gap: 8px; }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 18px;
+      align-items: start;
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .side-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    button {
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    input, select {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+    .field { margin-bottom: 12px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .folder-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .frame-controls {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      margin: 12px 0;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px 12px;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    .summary div:nth-child(odd) { color: var(--muted); }
+    pre {
+      min-height: 120px;
+      max-height: 260px;
+      overflow: auto;
+      margin: 12px 0 0;
+      white-space: pre-wrap;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    @media (max-width: 900px) {
+      header { align-items: stretch; flex-direction: column; }
+      .layout { grid-template-columns: 1fr; }
+      .preview-grid, .grid, .folder-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Dataset Trim</h1>
+        <div class="sub">Create a new recording by removing unused still frames at the beginning and end.</div>
+      </div>
+      <div class="nav">
+        <button onclick="location.href='/'">Control</button>
+        <button onclick="location.href='/teach'">Teaching</button>
+        <button onclick="location.href='/model-test'">Model test</button>
+      </div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2 class="side-title">Preview</h2>
+        <div class="field">
+          <label>Source folder</label>
+          <div class="folder-row">
+            <input id="sourceRoot" type="text" placeholder="default: widowx_ai/recordings">
+            <button onclick="loadRecordings()">Load</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Recording</label>
+          <select id="recordingSelect" onchange="loadSelectedRecording()"></select>
+        </div>
+        <div class="preview-grid">
+          <div>
+            <div class="camera-view">
+              <img id="previewImage" alt="Selected frame preview">
+              <span id="previewPlaceholder">No recording selected</span>
+            </div>
+          </div>
+          <div>
+            <div class="summary">
+              <div>Name</div><div id="recordingName">-</div>
+              <div>Type</div><div id="recordingType">-</div>
+              <div>Frames</div><div id="frameCount">0</div>
+              <div>Kept</div><div id="keptCount">0</div>
+              <div>Frame</div><div id="frameInfo">-</div>
+              <div>Task</div><div id="taskName">-</div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-controls">
+          <button onclick="stepFrame(-1)">Frame -</button>
+          <input id="frameSlider" type="range" min="0" max="0" step="1" value="0" oninput="showFrame(Number(this.value))">
+          <button onclick="stepFrame(1)">Frame +</button>
+        </div>
+        <div class="note" id="frameMeta">Select a recording to preview trim boundaries.</div>
+      </section>
+      <aside>
+        <h2 class="side-title">Trim settings</h2>
+        <div class="grid">
+          <div class="field">
+            <label>Cut first frames</label>
+            <input id="cutStart" type="number" min="0" step="1" value="0" oninput="updateTrimPreview()">
+          </div>
+          <div class="field">
+            <label>Cut last frames</label>
+            <input id="cutEnd" type="number" min="0" step="1" value="0" oninput="updateTrimPreview()">
+          </div>
+        </div>
+        <div class="field">
+          <label>New dataset folder name</label>
+          <input id="outputName" type="text" placeholder="auto: source_trim_first_last">
+        </div>
+        <button class="primary" onclick="createTrimmedDataset()">Create trimmed dataset</button>
+        <div class="note" style="margin-top:12px">
+          The new recording is written inside the selected source folder. It keeps the same metadata and images, but removes the selected start/end frames and remaps motor indices for ACT conversion.
+        </div>
+        <pre id="output">No trim created yet.</pre>
+      </aside>
+    </div>
+  </main>
+  <script>
+    let recordings = [];
+    let selectedRecording = null;
+    let frames = [];
+    let frameIndex = 0;
+    let activeSourceRoot = '';
+
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function labelRecording(rec) {
+      const task = rec.task_name ? ` · ${rec.task_name}` : '';
+      const type = rec.capture_type || 'manual';
+      return `${rec.name} · ${type}${task} (${rec.samples || rec.motor_samples || 0} frames)`;
+    }
+
+    async function loadRecordings() {
+      try {
+        const sourceInput = document.getElementById('sourceRoot');
+        const requestedRoot = sourceInput.value.trim();
+        const url = requestedRoot ? `/api/recordings?root=${encodeURIComponent(requestedRoot)}` : '/api/recordings';
+        const data = await api(url);
+        activeSourceRoot = data.root || requestedRoot || '';
+        sourceInput.value = activeSourceRoot;
+        recordings = data.recordings || [];
+        const select = document.getElementById('recordingSelect');
+        select.innerHTML = '';
+        recordings.forEach((rec) => {
+          const opt = document.createElement('option');
+          opt.value = rec.path;
+          opt.textContent = labelRecording(rec);
+          select.appendChild(opt);
+        });
+        if (!recordings.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No recording found';
+          select.appendChild(opt);
+          renderEmpty('No recording found.');
+          document.getElementById('output').textContent = `No dataset found in:\n${activeSourceRoot}`;
+          return;
+        }
+        await loadSelectedRecording();
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR: ${err.message}`;
+      }
+    }
+
+    async function loadSelectedRecording() {
+      const path = document.getElementById('recordingSelect').value;
+      if (!path) return;
+      try {
+        selectedRecording = await api('/api/recording/load', {path});
+        frames = selectedRecording.frames || [];
+        frameIndex = 0;
+        document.getElementById('frameSlider').max = Math.max(0, frames.length - 1);
+        document.getElementById('frameSlider').value = 0;
+        document.getElementById('recordingName').textContent = selectedRecording.name || '-';
+        document.getElementById('recordingType').textContent = selectedRecording.metadata?.capture_type || '-';
+        document.getElementById('frameCount').textContent = String(frames.length);
+        document.getElementById('taskName').textContent = selectedRecording.metadata?.task_name || '-';
+        document.getElementById('outputName').value = `${selectedRecording.name}_trim`;
+        updateTrimPreview();
+        showFrame(0);
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR load: ${err.message}`;
+      }
+    }
+
+    function trimValues() {
+      const cutStart = Math.max(0, Number(document.getElementById('cutStart').value || 0));
+      const cutEnd = Math.max(0, Number(document.getElementById('cutEnd').value || 0));
+      return {cutStart, cutEnd};
+    }
+
+    function updateTrimPreview() {
+      const {cutStart, cutEnd} = trimValues();
+      const kept = Math.max(0, frames.length - cutStart - cutEnd);
+      document.getElementById('keptCount').textContent = String(kept);
+      const slider = document.getElementById('frameSlider');
+      if (frames.length) {
+        const start = Math.min(cutStart, frames.length - 1);
+        slider.value = start;
+        showFrame(start);
+      }
+    }
+
+    function firstImage(frame) {
+      if (!frame) return '';
+      const images = frame.images || {};
+      return images.front || images.top_view || images.wrist_rgb || images.wrist_depth || frame.image || '';
+    }
+
+    function showFrame(index) {
+      if (!frames.length || !selectedRecording) {
+        renderEmpty('No frame');
+        return;
+      }
+      frameIndex = Math.max(0, Math.min(index, frames.length - 1));
+      const frame = frames[frameIndex];
+      const image = firstImage(frame);
+      const img = document.getElementById('previewImage');
+      const placeholder = document.getElementById('previewPlaceholder');
+      if (image) {
+        img.src = `/api/recording/image?path=${encodeURIComponent(selectedRecording.path)}&image=${encodeURIComponent(image)}&t=${Date.now()}`;
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+      } else {
+        img.style.display = 'none';
+        placeholder.style.display = 'block';
+        placeholder.textContent = 'No image for this frame';
+      }
+      document.getElementById('frameSlider').value = frameIndex;
+      document.getElementById('frameInfo').textContent = `${frameIndex + 1}/${frames.length}`;
+      const qpos = Array.isArray(frame.qpos) ? frame.qpos.map(v => Number(v).toFixed(2)).join(', ') : '-';
+      document.getElementById('frameMeta').textContent = `timestamp ${Number(frame.timestamp || 0).toFixed(3)} · motor ${frame.motor_index ?? '-'} · qpos ${qpos}`;
+    }
+
+    function stepFrame(delta) {
+      showFrame(frameIndex + delta);
+    }
+
+    function renderEmpty(message) {
+      document.getElementById('previewImage').style.display = 'none';
+      document.getElementById('previewPlaceholder').style.display = 'block';
+      document.getElementById('previewPlaceholder').textContent = message;
+      document.getElementById('recordingName').textContent = '-';
+      document.getElementById('recordingType').textContent = '-';
+      document.getElementById('frameCount').textContent = '0';
+      document.getElementById('keptCount').textContent = '0';
+      document.getElementById('frameInfo').textContent = '-';
+      document.getElementById('taskName').textContent = '-';
+    }
+
+    async function createTrimmedDataset() {
+      if (!selectedRecording) return;
+      const {cutStart, cutEnd} = trimValues();
+      try {
+        const data = await api('/api/recording/trim', {
+          path: selectedRecording.path,
+          source_root: activeSourceRoot,
+          cut_start: cutStart,
+          cut_end: cutEnd,
+          output_name: document.getElementById('outputName').value.trim()
+        });
+        document.getElementById('output').textContent =
+          `${data.message}\nframes kept: ${data.kept_frames}\nfolder: ${data.session_dir}`;
+        await loadRecordings();
+        const select = document.getElementById('recordingSelect');
+        select.value = data.session_dir;
+        await loadSelectedRecording();
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR trim: ${err.message}`;
+      }
+    }
+
+    loadRecordings();
+  </script>
+</body>
+</html>
