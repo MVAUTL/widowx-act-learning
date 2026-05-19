@@ -2357,7 +2357,7 @@ class ModelTestRunner:
         valid_usb_sources = {f"usb:{camera['index']}" for camera in cameras}
         if primary_camera_source.startswith("usb:") and primary_camera_source not in valid_usb_sources:
             primary_camera_source = next(iter(sorted(valid_usb_sources)), "")
-        steps = self._bounded_int(payload, "steps", 1, 1, 150)
+        steps = self._bounded_int(payload, "steps", 1, 1, 800)
         period = self._float_value(payload, "period", 1.0, 0.0)
         command_move_time = self._float_value(payload, "command_move_time", 0.5, 0.0)
         movement_speed = self._bounded_float(payload, "movement_speed", 100.0, 50.0, 100.0)
@@ -2440,7 +2440,7 @@ class ModelTestRunner:
             )
             process = self.process
         try:
-            stdout, stderr = process.communicate(timeout=max(30.0, steps * period + 30.0))
+            stdout, stderr = process.communicate(timeout=max(30.0, steps * max(effective_step_time, period, 0.05) + 30.0))
         except subprocess.TimeoutExpired:
             self.force_stop()
             stdout, stderr = process.communicate(timeout=5.0)

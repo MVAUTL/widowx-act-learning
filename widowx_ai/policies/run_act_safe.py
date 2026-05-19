@@ -8,14 +8,18 @@ both --real and --armed.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import inspect
 import json
 import math
 import signal
 import socket
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 from PIL import Image
@@ -73,6 +77,70 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _raise_lerobot_python_error(exc: SyntaxError) -> None:
+    raise RuntimeError(
+        "LeRobot import failed because the installed/source LeRobot uses syntax "
+        "that this Python version cannot parse. Use the project's "
+        ".venv-trossen-ui Python 3.10 environment with requirements.txt, or remove "
+        "lerobot_src from PYTHONPATH. If you intentionally use the latest LeRobot "
+        "source tree, run it with Python 3.12."
+    ) from exc
+
+
+@contextmanager
+def _compatible_lerobot_checkpoint(checkpoint_path: Path) -> Iterator[Path]:
+    config_path = checkpoint_path / "config.json"
+    if not config_path.exists():
+        yield checkpoint_path
+        return
+
+    try:
+        from lerobot.common.policies.act.configuration_act import ACTConfig
+    except ImportError:
+        try:
+            from lerobot.policies.act.configuration_act import ACTConfig
+        except SyntaxError as exc:
+            _raise_lerobot_python_error(exc)
+
+    config = _read_json(config_path)
+    valid_keys = set(inspect.signature(ACTConfig).parameters) | {"type"}
+    compatible_config = {key: value for key, value in config.items() if key in valid_keys}
+
+    if compatible_config.get("device") == "cuda" and not torch.cuda.is_available():
+        compatible_config["device"] = "cpu"
+        compatible_config["use_amp"] = False
+    if compatible_config.get("pretrained_backbone_weights") is not None:
+        compatible_config["pretrained_backbone_weights"] = None
+
+    if compatible_config == config:
+        yield checkpoint_path
+        return
+
+    dropped = sorted(set(config) - set(compatible_config))
+    if dropped:
+        print("LeRobot compatibility: ignoring unsupported config fields: " + ", ".join(dropped))
+    if compatible_config.get("device") != config.get("device"):
+        print(f"LeRobot compatibility: using device={compatible_config.get('device')} for local inference.")
+    if compatible_config.get("pretrained_backbone_weights") != config.get("pretrained_backbone_weights"):
+        print("LeRobot compatibility: loading backbone from checkpoint weights, not torchvision download.")
+
+    with tempfile.TemporaryDirectory(prefix="lerobot_policy_") as temp_dir:
+        temp_path = Path(temp_dir)
+        for child in checkpoint_path.iterdir():
+            if child.name == "config.json":
+                continue
+            target = temp_path / child.name
+            try:
+                target.symlink_to(child, target_is_directory=child.is_dir())
+            except OSError:
+                if child.is_dir():
+                    shutil.copytree(child, target)
+                else:
+                    shutil.copy2(child, target)
+        (temp_path / "config.json").write_text(json.dumps(compatible_config, indent=4), encoding="utf-8")
+        yield temp_path
+
+
 def _state_from_row(row: dict[str, Any]) -> np.ndarray:
     return np.asarray([*row["qpos"], row.get("gripper_position", 0.0)], dtype=np.float32)
 
@@ -103,8 +171,12 @@ def _load_policy(checkpoint_path: Path) -> tuple[Any, dict[str, Any], dict[str, 
         try:
             from lerobot.common.policies.act.modeling_act import ACTPolicy
         except ImportError:
-            from lerobot.policies.act.modeling_act import ACTPolicy
-        model = ACTPolicy.from_pretrained(checkpoint_path, local_files_only=True)
+            try:
+                from lerobot.policies.act.modeling_act import ACTPolicy
+            except SyntaxError as exc:
+                _raise_lerobot_python_error(exc)
+        with _compatible_lerobot_checkpoint(checkpoint_path) as compatible_checkpoint:
+            model = ACTPolicy.from_pretrained(compatible_checkpoint, local_files_only=True)
         _load_lerobot_processor_stats(model, checkpoint_path)
         model.eval()
         return model, {}, {}
