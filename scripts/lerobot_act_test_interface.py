@@ -49,10 +49,18 @@ class App:
     def __init__(self, dataset_root: Path, repo_id: str, checkpoint: Path, device: str) -> None:
         self.dataset = LeRobotDataset(repo_id, root=dataset_root)
         self.device = torch.device(device)
-        self.policy = ACTPolicy.from_pretrained(checkpoint, local_files_only=True)
-        self.policy.to(self.device)
-        self.policy.eval()
+        self.policy = None
+        self.policy_error: str | None = None
+        try:
+            self.policy = ACTPolicy.from_pretrained(checkpoint, local_files_only=True)
+            self.policy.to(self.device)
+            self.policy.eval()
+        except Exception as exc:  # noqa: BLE001 - shown in the review UI.
+            self.policy_error = str(exc)
         self.checkpoint = checkpoint
+        self.image_keys = sorted(
+            key for key in self.dataset.features if key.startswith("observation.images.")
+        )
 
     def predict(self, index: int) -> dict:
         index = max(0, min(index, len(self.dataset) - 1))
@@ -62,22 +70,37 @@ class App:
             for key, value in sample.items()
             if hasattr(value, "unsqueeze") and key.startswith(("observation", "action"))
         }
-        with torch.inference_mode():
-            pred = self.policy.select_action(batch)[0]
         target = sample["action"]
-        error = (pred.detach().cpu() - target.detach().cpu()).abs()
+        pred = None
+        error = None
+        predict_error = self.policy_error
+        if self.policy is not None:
+            try:
+                with torch.inference_mode():
+                    pred = self.policy.select_action(batch)[0]
+                error = (pred.detach().cpu() - target.detach().cpu()).abs()
+            except Exception as exc:  # noqa: BLE001 - mismatched camera sets are common during review.
+                predict_error = str(exc)
         return {
             "index": index,
             "count": len(self.dataset),
             "checkpoint": str(self.checkpoint),
             "device": str(self.device),
-            "top_view": _tensor_image_to_data_url(sample["observation.images.top_view"], "top_view"),
-            "wrist_rgb": _tensor_image_to_data_url(sample["observation.images.wrist_rgb"], "wrist_rgb"),
+            "images": [
+                {
+                    "key": key,
+                    "title": key.removeprefix("observation.images."),
+                    "url": _tensor_image_to_data_url(sample[key], key.removeprefix("observation.images.")),
+                }
+                for key in self.image_keys
+                if key in sample
+            ],
             "state": _round_list(sample["observation.state"]),
             "target": _round_list(target),
-            "pred": _round_list(pred),
-            "abs_error": _round_list(error),
-            "mean_abs_error": round(float(error.mean()), 4),
+            "pred": _round_list(pred) if pred is not None else None,
+            "abs_error": _round_list(error) if error is not None else None,
+            "mean_abs_error": round(float(error.mean()), 4) if error is not None else None,
+            "predict_error": predict_error,
             "episode_index": int(sample["episode_index"]),
             "frame_index": int(sample["frame_index"]),
             "timestamp": round(float(sample["timestamp"]), 3),
@@ -87,13 +110,15 @@ class App:
 def _table(row: dict) -> str:
     lines = []
     for i, name in enumerate(JOINT_NAMES):
+        pred_cell = f"<td>{row['pred'][i]:.4f}</td>" if row["pred"] is not None else "<td>-</td>"
+        error_cell = f"<td>{row['abs_error'][i]:.4f}</td>" if row["abs_error"] is not None else "<td>-</td>"
         lines.append(
             "<tr>"
             f"<td>{name}</td>"
             f"<td>{row['state'][i]:.4f}</td>"
             f"<td>{row['target'][i]:.4f}</td>"
-            f"<td>{row['pred'][i]:.4f}</td>"
-            f"<td>{row['abs_error'][i]:.4f}</td>"
+            f"{pred_cell}"
+            f"{error_cell}"
             "</tr>"
         )
     return "\n".join(lines)
@@ -103,6 +128,16 @@ def _page(row: dict) -> str:
     idx = row["index"]
     previous_idx = max(0, idx - 1)
     next_idx = min(row["count"] - 1, idx + 1)
+    image_cards = "\n".join(
+        f"""<div class="card"><h2>{item['title']}</h2><img src="{item['url']}" alt="{item['title']}"></div>"""
+        for item in row["images"]
+    ) or '<div class="card">No image feature in this dataset.</div>'
+    error_html = (
+        f"""<div class="card warn"><div>Prediction unavailable</div><code>{row['predict_error']}</code></div>"""
+        if row.get("predict_error")
+        else ""
+    )
+    metric = f"{row['mean_abs_error']:.4f}" if row["mean_abs_error"] is not None else "-"
     return f"""<!doctype html>
 <html lang="fr">
 <head>
@@ -118,6 +153,8 @@ def _page(row: dict) -> str:
     button, a.btn {{ padding: 9px 12px; border: 1px solid #0f62fe; background: #0f62fe; color: white; border-radius: 6px; text-decoration: none; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }}
     .card {{ background: white; border: 1px solid #d8dde3; border-radius: 8px; padding: 14px; }}
+    .card h2 {{ margin: 0 0 10px; font-size: 15px; }}
+    .warn {{ border-color: #d98c00; background: #fff8e8; }}
     img {{ width: 100%; border-radius: 6px; border: 1px solid #d8dde3; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
     th, td {{ text-align: right; padding: 8px; border-bottom: 1px solid #e5e8eb; }}
@@ -137,19 +174,19 @@ def _page(row: dict) -> str:
       <span>{idx + 1} / {row['count']}</span>
     </form>
     <div class="grid">
-      <div class="card"><img src="{row['top_view']}" alt="top_view"></div>
-      <div class="card"><img src="{row['wrist_rgb']}" alt="wrist_rgb"></div>
+      {image_cards}
     </div>
     <div class="grid" style="margin-top:14px">
       <div class="card">
         <div>Mean absolute error</div>
-        <div class="metric">{row['mean_abs_error']:.4f}</div>
+        <div class="metric">{metric}</div>
         <p>episode {row['episode_index']} | frame {row['frame_index']} | t={row['timestamp']}s | {row['device']}</p>
       </div>
       <div class="card">
         <div>Checkpoint</div>
         <code>{row['checkpoint']}</code>
       </div>
+      {error_html}
     </div>
     <div class="card" style="margin-top:14px">
       <table>
@@ -180,7 +217,7 @@ def main() -> int:
             index = int(query.get("i", ["0"])[0])
             row = app.predict(index)
             if urlparse(self.path).path == "/status.json":
-                data = json.dumps({k: v for k, v in row.items() if not str(k).endswith("view") and k != "wrist_rgb"}).encode()
+                data = json.dumps({k: v for k, v in row.items() if k != "images"}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))

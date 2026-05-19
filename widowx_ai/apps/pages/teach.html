@@ -803,74 +803,12 @@
             <div class="step-card review">
               <div class="step-kicker">Step 3</div>
               <h3>LeRobot Dataset export</h3>
-              <div class="card-subtitle">Convertit les captures WidowX en LeRobotDataset: parquet + meta + images ou videos. L'entrainement ACT reste prevu sur DGX.</div>
-              <div class="act-grid">
-                <div class="field">
-                  <label>HF dataset repo id</label>
-                  <input id="actRepoId" type="text" value="matteo/widowx-push-cube-local" oninput="refreshActPlan(false)">
-                </div>
-                <div class="field">
-                  <label>Dataset folder name</label>
-                  <input id="actDatasetName" type="text" value="widowx_push_cube_full" oninput="refreshActPlan(false)">
-                </div>
-                <div class="field">
-                  <label>Cameras for ACT</label>
-                  <select id="actCameras" onchange="refreshActPlan(false)">
-                    <option value="top_view,wrist_rgb" selected>top_view + wrist_rgb</option>
-                    <option value="front,wrist_rgb">front + wrist_rgb</option>
-                    <option value="top_view,front,wrist_rgb">top_view + front + wrist_rgb</option>
-                    <option value="top_view">top_view only</option>
-                    <option value="front">front only</option>
-                    <option value="wrist_rgb">wrist_rgb only</option>
-                    <option value="top_view,front,wrist_rgb,wrist_depth">top_view + front + wrist_rgb + wrist_depth</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>LeRobot output root</label>
-                  <input id="actOutputRoot" type="text" value="/tmp/lerobot_datasets/widowx_push_cube_full" oninput="refreshActPlan(false)">
-                </div>
-                <div class="field">
-                  <label>Media storage</label>
-                  <select id="actUseVideos" onchange="refreshActPlan(false)">
-                    <option value="false" selected>parquet + meta + images</option>
-                    <option value="true">parquet + meta + videos</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Max episodes</label>
-                  <input id="actMaxEpisodes" type="number" min="1" step="1" placeholder="all" oninput="refreshActPlan(false)">
-                </div>
-                <div class="field">
-                  <label>Training steps</label>
-                  <input id="actSteps" type="number" min="200" step="100" value="10000" oninput="refreshActPlan(false)">
-                </div>
-                <div class="field">
-                  <label>Batch size</label>
-                  <input id="actBatchSize" type="number" min="1" step="1" value="8" oninput="refreshActPlan(false)">
-                </div>
-                <div class="field">
-                  <label><input id="actOverwrite" type="checkbox" checked onchange="refreshActPlan(false)"> Overwrite output folder</label>
-                </div>
-              </div>
-              <div class="quality-grid">
-                <div class="quality-tile"><span class="quality-value" id="actEpisodes">0</span><span class="quality-label">dataset episodes</span></div>
-                <div class="quality-tile"><span class="quality-value" id="actFrames">0</span><span class="quality-label">camera frames</span></div>
-                <div class="quality-tile"><span class="quality-value" id="actTasks">0</span><span class="quality-label">task labels</span></div>
-                <div class="quality-tile"><span class="quality-value" id="actReady">-</span><span class="quality-label">ACT readiness</span></div>
-              </div>
-              <div class="status-pill" id="lerobotExportPill">
-                <span class="status-led"></span>
-                <span id="lerobotExportText">Export idle</span>
-              </div>
+              <div class="card-subtitle">L'export LeRobotDataset et les commandes ACT sont maintenant dans une page dediee.</div>
               <div class="action-row">
-                <button onclick="refreshActPlan(true)">Refresh ACT plan</button>
                 <button onclick="location.href='/dataset-trim'">Trim dataset</button>
-                <button class="primary" onclick="startLeRobotExport()">Export LeRobotDataset</button>
-                <button onclick="openActReview()">Open ACT review</button>
+                <button class="primary" onclick="location.href='/lerobot-export'">Open LeRobot export</button>
                 <button onclick="openMonitor()">Open training monitor</button>
               </div>
-              <pre class="act-output" id="actPlanOutput">ACT plan not loaded yet.</pre>
-              <pre class="act-output" id="lerobotExportOutput">LeRobot export not started yet.</pre>
             </div>
           </div>
 
@@ -1109,82 +1047,6 @@
       return data;
     }
 
-    function actPayload() {
-      const maxEpisodesRaw = document.getElementById('actMaxEpisodes')?.value;
-      const maxEpisodes = maxEpisodesRaw ? Number(maxEpisodesRaw) : null;
-      return {
-        repo_id: document.getElementById('actRepoId')?.value.trim() || 'matteo/widowx-push-cube-local',
-        dataset_name: document.getElementById('actDatasetName')?.value.trim() || 'widowx_push_cube_full',
-        cameras: document.getElementById('actCameras')?.value || 'top_view,wrist_rgb',
-        output_root: document.getElementById('actOutputRoot')?.value.trim() || '/tmp/lerobot_datasets/widowx_push_cube_full',
-        use_videos: document.getElementById('actUseVideos')?.value === 'true',
-        overwrite: Boolean(document.getElementById('actOverwrite')?.checked),
-        max_episodes: Number.isFinite(maxEpisodes) ? maxEpisodes : null,
-        steps: Number(document.getElementById('actSteps')?.value || 10000),
-        batch_size: Number(document.getElementById('actBatchSize')?.value || 8)
-      };
-    }
-
-    function renderActPlan(data) {
-      document.getElementById('actEpisodes').textContent = data.dataset.episodes;
-      document.getElementById('actFrames').textContent = data.dataset.frames;
-      document.getElementById('actTasks').textContent = data.dataset.tasks;
-      document.getElementById('actReady').textContent = data.dataset.ready ? 'yes' : 'check';
-      const warnings = data.dataset.warnings.length
-        ? `Warnings:\n${data.dataset.warnings.map((item) => `- ${item}`).join('\n')}\n\n`
-        : '';
-      document.getElementById('actPlanOutput').textContent =
-        `${warnings}LeRobotDataset output:\n${data.dataset.output_root}\nFormat: ${data.dataset.media_storage}\n\nConvert local captures to LeRobotDataset:\n${data.commands.convert}\n\nTrain ACT on DGX:\n${data.commands.train}\n\nDGX SLURM shortcuts:\n${data.commands.slurm}`;
-    }
-
-    async function refreshActPlan(writeLog = false) {
-      try {
-        const data = await api('/api/act_dataset/plan', actPayload());
-        renderActPlan(data);
-        if (writeLog) log('ACT LeRobot plan refreshed');
-      } catch (err) {
-        const out = document.getElementById('actPlanOutput');
-        if (out) out.textContent = `ERROR ACT plan: ${err.message}`;
-        if (writeLog) log(`ERROR ACT plan: ${err.message}`);
-      }
-    }
-
-    function renderLeRobotExportStatus(data) {
-      const pill = document.getElementById('lerobotExportPill');
-      const text = document.getElementById('lerobotExportText');
-      const out = document.getElementById('lerobotExportOutput');
-      if (!pill || !text || !out) return;
-      pill.classList.toggle('live', Boolean(data.running));
-      pill.classList.toggle('ok', !data.running && data.returncode === 0);
-      pill.classList.toggle('warn', !data.running && data.returncode !== 0);
-      text.textContent = data.running
-        ? `Export running PID ${data.pid}`
-        : (data.returncode === 0 ? 'Export complete' : 'Export idle');
-      const command = data.command ? `Command:\n${data.command}\n\n` : '';
-      out.textContent = `${data.message || ''}\n${data.output_root ? `Output: ${data.output_root}\n` : ''}${command}${data.output || ''}`.trim() || 'LeRobot export not started yet.';
-    }
-
-    async function refreshLeRobotExport(writeLog = false) {
-      try {
-        const data = await api('/api/lerobot_export/status');
-        renderLeRobotExportStatus(data);
-        if (writeLog) log(data.message);
-      } catch (err) {
-        const out = document.getElementById('lerobotExportOutput');
-        if (out) out.textContent = `ERROR LeRobot export: ${err.message}`;
-      }
-    }
-
-    async function startLeRobotExport() {
-      try {
-        const data = await api('/api/lerobot_export/start', actPayload());
-        renderLeRobotExportStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR LeRobot export: ${err.message}`);
-      }
-    }
-
     async function refreshActReview(writeLog = false) {
       try {
         const data = await api('/api/act_review/status');
@@ -1249,8 +1111,6 @@
         document.getElementById('holdButton').textContent = arm.hold ? 'Hold off' : 'Hold';
         updateCaptureSummary();
         updateCameraLoop();
-        refreshActPlan(false);
-        refreshLeRobotExport(false);
         if (writeLog) log('Status updated');
       } catch (err) {
         log(`ERROR: ${err.message}`);
@@ -2218,21 +2078,9 @@
       window.open('http://127.0.0.1:7865', '_blank');
     }
 
-    async function openActReview() {
-      try {
-        const data = await api('/api/act_review/start', actPayload());
-        log(data.message);
-        window.open(data.url || 'http://127.0.0.1:7866', '_blank');
-      } catch (err) {
-        log(`ERROR ACT review: ${err.message}`);
-      }
-    }
-
     applyCameraSettings();
     refreshAll();
     loadRecordings();
-    refreshActPlan(false);
-    refreshLeRobotExport(false);
     setInterval(() => refreshAll(false), 1500);
   </script>
 </body>
