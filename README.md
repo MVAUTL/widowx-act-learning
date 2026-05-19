@@ -120,6 +120,75 @@ Notes for a fresh PC:
 - The real robot should be tested in dry-run first, then with `--real` only when the workspace is clear.
 - If USB cameras do not appear, unplug/replug the camera and use `Refresh cameras` in the web UI.
 
+### Fix LeRobot model-test errors on another PC
+
+Always launch the interface with the project virtual environment, not the
+system Python:
+
+```bash
+cd /path/to/widowx-act-learning
+.venv-trossen-ui/bin/python -m widowx_ai.apps.interface --real --ip 192.168.1.2 --variant base --timeout 15 --port 7862
+```
+
+Check which Python and LeRobot are actually used:
+
+```bash
+.venv-trossen-ui/bin/python - <<'PY'
+import sys
+print("python", sys.executable)
+try:
+    import lerobot
+    print("lerobot", getattr(lerobot, "__version__", "unknown"))
+    print("lerobot_file", lerobot.__file__)
+except Exception as exc:
+    print(type(exc).__name__, exc)
+PY
+```
+
+If the output points to a local source checkout such as
+`lerobot_src/src/lerobot`, remove it from the environment before running the
+UI:
+
+```bash
+unset PYTHONPATH
+```
+
+Then reinstall the dependencies expected by this project:
+
+```bash
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
+.venv-trossen-ui/bin/python -m pip install -r requirements.txt
+```
+
+Common error:
+
+```text
+SyntaxError: invalid syntax
+def deserialize_json_into_object[T: JsonLike](...)
+```
+
+Cause: the PC is loading a recent LeRobot source tree that requires Python
+3.12 syntax, while the robot UI is running with Python 3.10. Use this project's
+`.venv-trossen-ui` environment and remove `lerobot_src` from `PYTHONPATH`, or
+run that LeRobot source tree with Python 3.12 in a separate environment.
+
+Common error:
+
+```text
+The fields `use_peft`, `push_to_hub`, `repo_id`, ... are not valid for ACTConfig
+```
+
+Cause: the model was trained on the DGX with a LeRobot config that contains
+newer fields than the local LeRobot reader accepts. Current `run_act_safe.py`
+handles this by ignoring unsupported inference-only config fields, so update
+the other PC first:
+
+```bash
+git fetch origin
+git checkout lerobot-teach-dataset-export
+git pull --ff-only origin lerobot-teach-dataset-export
+```
+
 ### Update an existing PC after changes are pushed
 
 From the project folder on the other computer:
