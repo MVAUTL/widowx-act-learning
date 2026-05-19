@@ -285,7 +285,14 @@
           <button onclick="exportSelectedDataset()">Export selected LeRobot</button>
         </div>
         <div class="action-row" style="margin-top:8px">
+          <button onclick="previewAllExportPlan()">Preview all export plan</button>
+          <button class="primary" onclick="exportAllDatasets()">Export ALL LeRobot</button>
+        </div>
+        <div class="action-row" style="margin-top:8px">
           <button class="primary" onclick="autoCutAndExport()">Auto cut + export</button>
+          <button class="primary" onclick="autoCutAllAndExportAll()">Auto cut ALL + export ALL</button>
+        </div>
+        <div class="action-row" style="margin-top:8px">
           <button class="primary" onclick="createTrimmedDataset()">Create with current values</button>
         </div>
         <div class="note" style="margin-top:12px">
@@ -409,12 +416,12 @@
       return delta;
     }
 
-    function detectStationaryTrim() {
-      if (frames.length < 3) throw new Error('Need at least 3 frames to auto-detect still sections.');
+    function detectStationaryTrimFor(sourceFrames) {
+      if (sourceFrames.length < 3) throw new Error('Need at least 3 frames to auto-detect still sections.');
       let firstMotion = -1;
       let lastMotion = -1;
-      for (let i = 1; i < frames.length; i += 1) {
-        if (maxJointDelta(frames[i - 1], frames[i]) > STILL_DELTA_RAD) {
+      for (let i = 1; i < sourceFrames.length; i += 1) {
+        if (maxJointDelta(sourceFrames[i - 1], sourceFrames[i]) > STILL_DELTA_RAD) {
           if (firstMotion < 0) firstMotion = i;
           lastMotion = i;
         }
@@ -423,12 +430,16 @@
         throw new Error('No robot motion detected from qpos. Nothing was cut.');
       }
       const cutStart = Math.max(0, firstMotion - STILL_KEEP_BUFFER_FRAMES);
-      const keepEndIndex = Math.min(frames.length - 1, lastMotion + STILL_KEEP_BUFFER_FRAMES);
-      const cutEnd = Math.max(0, frames.length - 1 - keepEndIndex);
-      if (cutStart + cutEnd >= frames.length) {
+      const keepEndIndex = Math.min(sourceFrames.length - 1, lastMotion + STILL_KEEP_BUFFER_FRAMES);
+      const cutEnd = Math.max(0, sourceFrames.length - 1 - keepEndIndex);
+      if (cutStart + cutEnd >= sourceFrames.length) {
         throw new Error('Auto-cut would remove all frames. Nothing was cut.');
       }
       return {cutStart, cutEnd};
+    }
+
+    function detectStationaryTrim() {
+      return detectStationaryTrimFor(frames);
     }
 
     function autoDetectStillFrames() {
@@ -471,6 +482,24 @@
       return (ordered.length ? ordered : Array.from(cameraSet)).join(',') || 'front';
     }
 
+    function datasetReplayRecordings() {
+      return recordings.filter((rec) => rec.capture_type === 'dataset_replay' || rec.path === selectedRecording?.path);
+    }
+
+    function camerasForRecordings(selected) {
+      const cameraChoice = document.getElementById('actCameras')?.value || 'auto';
+      if (cameraChoice !== 'auto') return cameraChoice;
+      const preferred = ['front', 'top_view', 'wrist_rgb', 'wrist_depth'];
+      const roleSets = selected
+        .map((rec) => new Set((rec.capture_sources || []).map((entry) => entry.role).filter(Boolean)))
+        .filter((set) => set.size);
+      if (!roleSets.length) return selectedCameras();
+      const common = preferred.filter((role) => roleSets.every((set) => set.has(role)));
+      if (common.length) return common.join(',');
+      const union = preferred.filter((role) => roleSets.some((set) => set.has(role)));
+      return union.join(',') || selectedCameras();
+    }
+
     function syncOutputRoot(force = false) {
       const datasetName = safeDatasetName(document.getElementById('actDatasetName')?.value || selectedRecording?.name);
       const output = document.getElementById('actOutputRoot');
@@ -490,14 +519,18 @@
 
     function exportPayload(recording) {
       const datasetName = safeDatasetName(recording?.name || document.getElementById('outputName').value);
+      return exportPayloadFor([recording.path], datasetName, [recording]);
+    }
+
+    function exportPayloadFor(recordingPaths, fallbackName, selected = []) {
+      const datasetName = safeDatasetName(fallbackName || document.getElementById('outputName').value);
       const configuredName = safeDatasetName(document.getElementById('actDatasetName')?.value || datasetName);
-      const cameraChoice = document.getElementById('actCameras')?.value || 'auto';
       return {
         repo_id: document.getElementById('actRepoId')?.value.trim() || `matteo/${configuredName}`,
         dataset_name: configuredName,
         source_root: activeSourceRoot,
-        recording_paths: [recording.path],
-        cameras: cameraChoice === 'auto' ? selectedCameras() : cameraChoice,
+        recording_paths: recordingPaths,
+        cameras: camerasForRecordings(selected),
         output_root: document.getElementById('actOutputRoot')?.value.trim() || `/tmp/lerobot_datasets/${configuredName}`,
         use_videos: document.getElementById('actUseVideos')?.value === 'true',
         overwrite: Boolean(document.getElementById('actOverwrite')?.checked),
@@ -505,6 +538,14 @@
         steps: Number(document.getElementById('actSteps')?.value || 10000),
         batch_size: Number(document.getElementById('actBatchSize')?.value || 8)
       };
+    }
+
+    function allExportPayload() {
+      const selected = datasetReplayRecordings();
+      if (!selected.length) throw new Error('No dataset_replay recordings found in this source folder.');
+      const sourceName = activeSourceRoot.split('/').filter(Boolean).pop() || 'widowx_all_datasets';
+      const fallbackName = `${safeDatasetName(sourceName)}_all`;
+      return exportPayloadFor(selected.map((rec) => rec.path), fallbackName, selected);
     }
 
     function renderExportStatus(data) {
@@ -552,11 +593,35 @@
       }
     }
 
+    async function previewAllExportPlan() {
+      try {
+        const data = await api('/api/act_dataset/plan', allExportPayload());
+        const warnings = data.dataset.warnings.length
+          ? `Warnings:\n${data.dataset.warnings.map((item) => `- ${item}`).join('\n')}\n\n`
+          : '';
+        document.getElementById('output').textContent =
+          `${warnings}ALL DATASETS EXPORT\nSource:\n${data.dataset.source_root}\n\nSelected recordings (${data.dataset.episodes}):\n${data.dataset.selected_recordings.join('\n') || '-'}\n\nLeRobotDataset output:\n${data.dataset.output_root}\nFormat: ${data.dataset.media_storage}\nFrames: ${data.dataset.frames}\nCameras: ${data.dataset.requested_cameras.join(', ')}\n\nConvert:\n${data.commands.convert}\n\nTrain ACT on DGX:\n${data.commands.train}`;
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR all export plan: ${err.message}`;
+      }
+    }
+
     async function exportSelectedDataset() {
       try {
         await startExportForRecording(selectedRecording);
       } catch (err) {
         document.getElementById('output').textContent = `ERROR export: ${err.message}`;
+      }
+    }
+
+    async function exportAllDatasets() {
+      try {
+        const data = await api('/api/lerobot_export/start', allExportPayload());
+        renderExportStatus(data);
+        if (exportPoll) clearInterval(exportPoll);
+        exportPoll = setInterval(pollExportStatus, 1500);
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR export all: ${err.message}`;
       }
     }
 
@@ -567,6 +632,51 @@
         await startExportForRecording({path: data.session_dir, name: data.session_dir.split('/').pop()});
       } catch (err) {
         document.getElementById('output').textContent = `ERROR auto cut/export: ${err.message}`;
+      }
+    }
+
+    async function autoCutAllAndExportAll() {
+      try {
+        const sourceRecordings = datasetReplayRecordings();
+        if (!sourceRecordings.length) throw new Error('No dataset_replay recordings found in this source folder.');
+        const trimmed = [];
+        const logLines = [`Auto cut ALL started: ${sourceRecordings.length} dataset(s)`];
+        document.getElementById('output').textContent = logLines.join('\n');
+        for (let index = 0; index < sourceRecordings.length; index += 1) {
+          const rec = sourceRecordings[index];
+          const loaded = await api('/api/recording/load', {path: rec.path});
+          const recFrames = loaded.frames || [];
+          const {cutStart, cutEnd} = detectStationaryTrimFor(recFrames);
+          const outputName = `${safeDatasetName(rec.name)}_autocut`;
+          const data = await api('/api/recording/trim', {
+            path: rec.path,
+            source_root: activeSourceRoot,
+            cut_start: cutStart,
+            cut_end: cutEnd,
+            output_name: outputName
+          });
+          trimmed.push({
+            path: data.session_dir,
+            name: data.session_dir.split('/').pop(),
+            capture_type: 'dataset_replay',
+            capture_sources: rec.capture_sources || []
+          });
+          logLines.push(`${index + 1}/${sourceRecordings.length} ${rec.name}: cut first=${cutStart}, cut last=${cutEnd}, kept=${data.kept_frames}`);
+          document.getElementById('output').textContent = logLines.join('\n');
+        }
+        await loadRecordings();
+        const sourceName = activeSourceRoot.split('/').filter(Boolean).pop() || 'widowx_all_datasets';
+        const fallbackName = `${safeDatasetName(sourceName)}_autocut_all`;
+        const exportData = await api('/api/lerobot_export/start', exportPayloadFor(
+          trimmed.map((rec) => rec.path),
+          fallbackName,
+          trimmed
+        ));
+        renderExportStatus(exportData);
+        if (exportPoll) clearInterval(exportPoll);
+        exportPoll = setInterval(pollExportStatus, 1500);
+      } catch (err) {
+        document.getElementById('output').textContent = `ERROR auto cut all/export all: ${err.message}`;
       }
     }
 

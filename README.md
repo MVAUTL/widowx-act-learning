@@ -70,6 +70,30 @@ Verify the environment before connecting to the robot:
 .venv-trossen-ui/bin/python -m py_compile widowx_ai/apps/interface.py
 ```
 
+Verify the model-test dependencies:
+
+```bash
+.venv-trossen-ui/bin/python - <<'PY'
+modules = [
+    "trossen_arm",
+    "numpy",
+    "cv2",
+    "pyrealsense2",
+    "PIL",
+    "torch",
+    "torchvision",
+    "safetensors",
+    "datasets",
+    "pandas",
+    "pyarrow",
+    "jsonlines",
+]
+for module in modules:
+    __import__(module)
+    print(module, "OK")
+PY
+```
+
 Start the interface in dry-run mode first:
 
 ```bash
@@ -92,8 +116,61 @@ Useful pages after startup:
 Notes for a fresh PC:
 
 - Large local assets such as `widowx_ai/models/` and `widowx_ai/recordings*/` are not stored in Git.
+- The `/model-test` page needs model checkpoints under `widowx_ai/models/`; copy them manually from the training machine or DGX output.
 - The real robot should be tested in dry-run first, then with `--real` only when the workspace is clear.
 - If USB cameras do not appear, unplug/replug the camera and use `Refresh cameras` in the web UI.
+
+### Update an existing PC after changes are pushed
+
+From the project folder on the other computer:
+
+```bash
+cd /path/to/widowx-act-learning
+git status
+git fetch origin
+git checkout lerobot-teach-dataset-export
+git pull --ff-only origin lerobot-teach-dataset-export
+```
+
+If `git pull` refuses because local files were modified, inspect them before
+overwriting anything:
+
+```bash
+git status --short
+```
+
+Then either commit your local work, or temporarily stash it:
+
+```bash
+git stash push -m "local work before update"
+git pull --ff-only origin lerobot-teach-dataset-export
+```
+
+After every update, reinstall dependencies in case `requirements.txt` changed:
+
+```bash
+.venv-trossen-ui/bin/python -m pip install --upgrade pip setuptools wheel
+.venv-trossen-ui/bin/python -m pip install -r requirements.txt
+```
+
+Run the checks again:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.robot.widowx_demo --check-import
+.venv-trossen-ui/bin/python -m py_compile widowx_ai/apps/interface.py
+```
+
+Then restart the interface:
+
+```bash
+.venv-trossen-ui/bin/python -m widowx_ai.apps.interface --real --ip 192.168.1.2 --variant base --timeout 15 --port 7862
+```
+
+Open the model test page:
+
+```text
+http://127.0.0.1:7862/model-test
+```
 
 ### Minimal local setup
 

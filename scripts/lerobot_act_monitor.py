@@ -33,6 +33,66 @@ def _latest_metrics(lines: list[str]) -> dict[str, str | None]:
     return latest
 
 
+def _metric_history(lines: list[str], limit: int = 80) -> list[dict[str, float]]:
+    points: list[dict[str, float]] = []
+    for line in lines:
+        match = STEP_RE.search(line)
+        if not match:
+            continue
+        step = _expand_count(match.group("step"))
+        try:
+            points.append(
+                {
+                    "step": float(step or 0),
+                    "loss": float(match.group("loss")),
+                    "lr": float(match.group("lr")),
+                }
+            )
+        except ValueError:
+            continue
+    return points[-limit:]
+
+
+def _loss_svg(points: list[dict[str, float]]) -> str:
+    width = 760
+    height = 220
+    pad_left = 54
+    pad_right = 18
+    pad_top = 18
+    pad_bottom = 36
+    if len(points) < 2:
+        return f'<svg viewBox="0 0 {width} {height}" role="img"><text x="24" y="112" fill="#5c6670">waiting for loss points</text></svg>'
+    steps = [point["step"] for point in points]
+    losses = [point["loss"] for point in points]
+    min_step, max_step = min(steps), max(steps)
+    min_loss, max_loss = min(losses), max(losses)
+    if max_step <= min_step:
+        max_step = min_step + 1
+    if max_loss <= min_loss:
+        max_loss = min_loss + 1e-6
+
+    def x(step: float) -> float:
+        return pad_left + ((step - min_step) / (max_step - min_step)) * (width - pad_left - pad_right)
+
+    def y(loss: float) -> float:
+        return pad_top + (1 - ((loss - min_loss) / (max_loss - min_loss))) * (height - pad_top - pad_bottom)
+
+    polyline = " ".join(f"{x(point['step']):.1f},{y(point['loss']):.1f}" for point in points)
+    last = points[-1]
+    first = points[0]
+    return f"""
+<svg viewBox="0 0 {width} {height}" role="img" aria-label="Loss over training steps">
+  <line x1="{pad_left}" y1="{pad_top}" x2="{pad_left}" y2="{height - pad_bottom}" stroke="#d8dde3"/>
+  <line x1="{pad_left}" y1="{height - pad_bottom}" x2="{width - pad_right}" y2="{height - pad_bottom}" stroke="#d8dde3"/>
+  <text x="8" y="{pad_top + 6}" fill="#5c6670" font-size="12">{max_loss:.4g}</text>
+  <text x="8" y="{height - pad_bottom}" fill="#5c6670" font-size="12">{min_loss:.4g}</text>
+  <text x="{pad_left}" y="{height - 10}" fill="#5c6670" font-size="12">{int(first['step'])}</text>
+  <text x="{width - pad_right - 58}" y="{height - 10}" fill="#5c6670" font-size="12">{int(last['step'])}</text>
+  <polyline points="{polyline}" fill="none" stroke="#2f80ed" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="{x(last['step']):.1f}" cy="{y(last['loss']):.1f}" r="4" fill="#2f80ed"/>
+</svg>"""
+
+
 def _expand_count(value: str | None) -> str | None:
     if value is None:
         return None
@@ -68,12 +128,14 @@ class Handler(BaseHTTPRequestHandler):
     def _status(self) -> dict[str, Any]:
         lines = _tail(self.log_path, 240)
         checkpoints = sorted((self.output_dir / "checkpoints").glob("*")) if self.output_dir.exists() else []
+        history = _metric_history(lines)
         return {
             "uptime_seconds": round(time.time() - self.started_at, 1),
             "log_path": str(self.log_path),
             "output_dir": str(self.output_dir),
             "dataset_dir": str(self.dataset_dir),
             "latest": _latest_metrics(lines),
+            "history": history,
             "checkpoints": [path.name for path in checkpoints if path.is_dir()],
             "dataset": _dataset_info(self.dataset_dir),
             "tail": lines[-80:],
@@ -84,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         latest = status["latest"]
         checkpoints = ", ".join(status["checkpoints"]) or "none yet"
         dataset = status["dataset"]
+        chart = _loss_svg(status["history"])
         tail = "\n".join(html.escape(line) for line in status["tail"])
         return f"""<!doctype html>
 <html lang="en">
@@ -102,6 +165,7 @@ class Handler(BaseHTTPRequestHandler):
     .value {{ font-size: 22px; font-weight: 700; margin-top: 4px; }}
     pre {{ background: #0d1117; color: #d6deeb; padding: 16px; border-radius: 8px; overflow: auto; max-height: 58vh; }}
     code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
+    svg {{ display: block; width: 100%; height: 260px; }}
   </style>
 </head>
 <body>
@@ -116,6 +180,10 @@ class Handler(BaseHTTPRequestHandler):
     <div class="card" style="margin-top:12px">
       <div class="label">Checkpoints</div>
       <div>{html.escape(checkpoints)}</div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <div class="label">Loss graph</div>
+      {chart}
     </div>
     <div class="card" style="margin-top:12px">
       <div class="label">Dataset</div>

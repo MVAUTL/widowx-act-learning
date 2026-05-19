@@ -1,4 +1,20 @@
+# WidowX robot driver and Trossen/LeRobot UI stack
 trossen-arm==1.9.1
+trossen-ai-data-collection-ui==1.2.2
+
+# Numeric, camera, and image runtime used by the local web UI
 numpy==2.2.6
+opencv-python==4.12.0.88
 pyrealsense2==2.57.7.10387
-opencv-python==4.13.0.92
+pillow==12.1.1
+
+# Local ACT training and model-test runtime
+torch==2.6.0
+torchvision==0.21.0
+safetensors==0.7.0
+datasets==3.6.0
+pandas==2.3.3
+pyarrow==24.0.0
+jsonlines==4.0.0
+rerun-sdk==0.31.3
+wandb==0.26.0
