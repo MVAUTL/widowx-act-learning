@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import pty
 import re
+import select
+import shutil
+import subprocess
+import tempfile
+import time
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from typing import Any
 
 import numpy as np
@@ -18,6 +26,12 @@ except ImportError:
 class HamsterService:
     def __init__(self, camera_controller: Any) -> None:
         self.camera_controller = camera_controller
+        self.dgx_host = os.environ.get("DGX_SPARK_HOST", "192.168.100.36")
+        self.dgx_user = os.environ.get("DGX_SPARK_USER", "guest")
+        self.dgx_workdir = os.environ.get("DGX_HAMSTER_WORKDIR", "~/intern_matteo_vulliez")
+        self.dgx_slurm_script = os.environ.get("DGX_HAMSTER_SLURM", "slurm/hamster_full_pipeline.slurm")
+        self.dgx_job_name = os.environ.get("DGX_HAMSTER_JOB_NAME", "matteo-hamster-full")
+        self.dgx_backend_url = os.environ.get("DGX_HAMSTER_URL", f"http://{self.dgx_host}:8000")
 
     def send_camera(self, payload: dict[str, Any]) -> dict[str, Any]:
         source = str(payload.get("source") or "").strip()
@@ -33,13 +47,310 @@ class HamsterService:
         frame = self.camera_controller.video_frame_jpeg(source)
         raw_response = self._request_hamster(base_url, frame, quest)
         answer = self._extract_answer(raw_response)
+        parsed_points = self._parse_points(answer)
         return {
             "ok": True,
             "answer": answer,
             "output_image": self._output_image(frame, answer),
+            "point_count": len(parsed_points),
+            "points": [
+                {"x": x, "y": y, "gripper_action": action}
+                for x, y, action in parsed_points
+            ],
             "raw_response": raw_response,
             "message": f"Hamster answered from {source}",
         }
+
+    def status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        backend = self._backend_status()
+        remote = self._run_dgx_command(
+            "squeue -h -u $USER -n "
+            f"{self._shell_quote(self.dgx_job_name)} -o '%i %T %M %j' || true",
+            timeout=10,
+            password=self._password_from_payload(payload),
+        )
+        running_jobs = remote["stdout"].strip().splitlines() if remote["ok"] and remote["stdout"].strip() else []
+        return {
+            "ok": True,
+            "backend_url": self.dgx_backend_url,
+            "backend_ready": backend["ready"],
+            "backend_message": backend["message"],
+            "dgx_host": self.dgx_host,
+            "job_name": self.dgx_job_name,
+            "jobs": running_jobs,
+            "ssh_ok": remote["ok"],
+            "ssh_message": remote["message"],
+            "message": self._status_message(backend["ready"], running_jobs, remote),
+        }
+
+    def start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        script = str(payload.get("slurm_script") or self.dgx_slurm_script).strip()
+        password = self._password_from_payload(payload)
+        command = (
+            f"cd {self.dgx_workdir} && "
+            "if squeue -h -u $USER -n "
+            f"{self._shell_quote(self.dgx_job_name)} | grep -q .; then "
+            f"echo 'Hamster job already queued/running: {self.dgx_job_name}'; "
+            "else "
+            f"sbatch {self._shell_quote(script)}; "
+            "fi"
+        )
+        result = self._run_dgx_command(command, timeout=20, password=password)
+        if not result["ok"]:
+            raise RuntimeError(result["message"])
+        status = self.status(payload)
+        status["message"] = result["stdout"].strip() or "Hamster start command sent."
+        return status
+
+    def stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        password = self._password_from_payload(payload)
+        command = (
+            "if squeue -h -u $USER -n "
+            f"{self._shell_quote(self.dgx_job_name)} | grep -q .; then "
+            f"scancel -n {self._shell_quote(self.dgx_job_name)} && "
+            f"echo 'Cancelled {self.dgx_job_name}'; "
+            "else "
+            f"echo 'No running {self.dgx_job_name} job'; "
+            "fi"
+        )
+        result = self._run_dgx_command(command, timeout=20, password=password)
+        if not result["ok"]:
+            raise RuntimeError(result["message"])
+        status = self.status(payload)
+        status["message"] = result["stdout"].strip() or "Hamster stop command sent."
+        return status
+
+    def _backend_status(self) -> dict[str, Any]:
+        try:
+            request = urllib.request.Request(f"{self.dgx_backend_url.rstrip('/')}/docs", method="GET")
+            with urllib.request.urlopen(request, timeout=3) as response:
+                ready = 200 <= response.status < 400
+                return {
+                    "ready": ready,
+                    "message": f"HTTP {response.status}",
+                }
+        except urllib.error.URLError as exc:
+            return {"ready": False, "message": str(exc.reason)}
+        except Exception as exc:  # noqa: BLE001 - surfaced to the browser.
+            return {"ready": False, "message": str(exc)}
+
+    def _run_dgx_command(self, remote_command: str, *, timeout: int, password: str = "") -> dict[str, Any]:
+        ssh_target = f"{self.dgx_user}@{self.dgx_host}"
+        command = ["ssh", "-F", "/dev/null", "-4", "-o", "ConnectTimeout=8", ssh_target, remote_command]
+        password = password or os.environ.get("DGX_SPARK_PASSWORD", "")
+        if password:
+            sshpass = shutil.which("sshpass")
+            if not sshpass:
+                return self._run_dgx_command_with_askpass(command, password, timeout=timeout)
+            command = [sshpass, "-p", password, *command]
+        else:
+            command[2:2] = ["-o", "BatchMode=yes"]
+        try:
+            process = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "ok": False,
+                "stdout": exc.stdout or "",
+                "stderr": exc.stderr or "",
+                "message": "Timed out while contacting DGX Spark over SSH.",
+            }
+        except FileNotFoundError as exc:
+            return {
+                "ok": False,
+                "stdout": "",
+                "stderr": "",
+                "message": f"Required command not found: {exc.filename}",
+            }
+
+        ok = process.returncode == 0
+        stderr = process.stderr.strip()
+        stdout = process.stdout.strip()
+        if ok:
+            message = stdout or "DGX command completed."
+        elif "Permission denied" in stderr and not password:
+            message = (
+                "SSH authentication failed. Configure an SSH key, or start the local UI with "
+                "DGX_SPARK_PASSWORD set and sshpass installed."
+            )
+        else:
+            message = stderr or stdout or f"DGX SSH command failed with exit code {process.returncode}."
+        return {
+            "ok": ok,
+            "stdout": stdout,
+            "stderr": stderr,
+            "message": message,
+        }
+
+    def _run_dgx_command_with_askpass(self, command: list[str], password: str, *, timeout: int) -> dict[str, Any]:
+        setsid = shutil.which("setsid")
+        if not setsid:
+            return self._run_dgx_command_with_pty(command, password, timeout=timeout)
+
+        with tempfile.TemporaryDirectory(prefix="dgx_askpass_") as temp_dir:
+            askpass = os.path.join(temp_dir, "askpass.sh")
+            with open(askpass, "w", encoding="utf-8") as file:
+                file.write("#!/bin/sh\n")
+                file.write("printf '%s\\n' \"$DGX_ASKPASS_PASSWORD\"\n")
+            os.chmod(askpass, 0o700)
+            env = os.environ.copy()
+            env["SSH_ASKPASS"] = askpass
+            env["SSH_ASKPASS_REQUIRE"] = "force"
+            env["DGX_ASKPASS_PASSWORD"] = password
+            env.setdefault("DISPLAY", "localhost:0")
+            try:
+                process = subprocess.run(
+                    [setsid, *command],
+                    text=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=timeout,
+                    check=False,
+                    env=env,
+                )
+            except subprocess.TimeoutExpired as exc:
+                return {
+                    "ok": False,
+                    "stdout": exc.stdout or "",
+                    "stderr": exc.stderr or "",
+                    "message": "Timed out while contacting DGX Spark over SSH.",
+                }
+
+        ok = process.returncode == 0
+        stdout = process.stdout.strip()
+        stderr = process.stderr.strip()
+        if ok:
+            message = stdout or "DGX command completed."
+        elif "Permission denied" in stderr:
+            message = "SSH authentication failed. Check the DGX SSH password."
+        else:
+            message = stderr or stdout or f"DGX SSH command failed with exit code {process.returncode}."
+        return {
+            "ok": ok,
+            "stdout": stdout,
+            "stderr": stderr,
+            "message": message,
+        }
+
+    def _run_dgx_command_with_pty(self, command: list[str], password: str, *, timeout: int) -> dict[str, Any]:
+        master_fd, slave_fd = pty.openpty()
+        process = subprocess.Popen(
+            command,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        output = bytearray()
+        password_sent = False
+        host_confirmed = False
+        deadline = time.monotonic() + timeout
+        timed_out = False
+
+        try:
+            while process.poll() is None:
+                if time.monotonic() > deadline:
+                    timed_out = True
+                    process.kill()
+                    break
+                readable, _, _ = select.select([master_fd], [], [], 0.1)
+                if not readable:
+                    continue
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+                lowered = bytes(output).lower()
+                if not host_confirmed and b"are you sure you want to continue connecting" in lowered:
+                    os.write(master_fd, b"yes\n")
+                    host_confirmed = True
+                if not password_sent and b"password:" in lowered:
+                    os.write(master_fd, f"{password}\n".encode("utf-8"))
+                    password_sent = True
+
+            while True:
+                readable, _, _ = select.select([master_fd], [], [], 0)
+                if not readable:
+                    break
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+        finally:
+            with suppress(OSError):
+                os.close(master_fd)
+
+        text = output.decode("utf-8", errors="replace").strip()
+        if timed_out:
+            return {
+                "ok": False,
+                "stdout": text,
+                "stderr": "",
+                "message": "Timed out while contacting DGX Spark over SSH.",
+            }
+        ok = process.returncode == 0
+        if ok:
+            message = self._clean_ssh_pty_output(text) or "DGX command completed."
+        elif "permission denied" in text.lower():
+            message = "SSH authentication failed. Check the DGX SSH password."
+        else:
+            message = text or f"DGX SSH command failed with exit code {process.returncode}."
+        clean_output = self._clean_ssh_pty_output(text)
+        return {
+            "ok": ok,
+            "stdout": clean_output,
+            "stderr": "" if ok else text,
+            "message": message,
+        }
+
+    @staticmethod
+    def _clean_ssh_pty_output(text: str) -> str:
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.lower().endswith("'s password:"):
+                continue
+            if "permanently added" in stripped.lower():
+                continue
+            lines.append(stripped)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _password_from_payload(payload: dict[str, Any] | None) -> str:
+        if not payload:
+            return ""
+        return str(payload.get("password") or payload.get("dgx_password") or "").strip()
+
+    @staticmethod
+    def _shell_quote(value: str) -> str:
+        return "'" + value.replace("'", "'\\''") + "'"
+
+    @staticmethod
+    def _status_message(backend_ready: bool, jobs: list[str], remote: dict[str, Any]) -> str:
+        if backend_ready:
+            return "Hamster backend is ready."
+        if jobs:
+            return "Hamster SLURM job is queued/running; backend is not ready yet."
+        if not remote["ok"]:
+            return remote["message"]
+        return "Hamster backend is stopped."
 
     def _request_hamster(self, base_url: str, frame_jpeg: bytes, quest: str) -> dict[str, Any]:
         image_b64 = base64.b64encode(frame_jpeg).decode("ascii")

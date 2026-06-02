@@ -11,6 +11,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlparse
 
 import numpy as np
 import trossen_arm
@@ -29,6 +30,7 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[s
     body = json.dumps(payload, indent=2).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -75,10 +77,9 @@ class CartesianController:
                 "message": self.last_message,
                 "error": self.last_error,
                 "limits": {
-                    "max_translation_delta_m": self.args.max_translation_delta,
-                    "max_rotation_delta_rad": self.args.max_rotation_delta,
+                    "max_translation_speed_m_s": self.args.max_translation_speed,
+                    "max_rotation_speed_rad_s": self.args.max_rotation_speed,
                     "min_goal_time_s": self.args.min_goal_time,
-                    "max_goal_time_s": self.args.max_goal_time,
                     "max_camera_wrist_effort_nm": self.args.max_camera_wrist_effort,
                 },
             }
@@ -190,25 +191,15 @@ class CartesianController:
             raise ValueError("target must contain exactly 6 values")
         if not np.all(np.isfinite(pose)):
             raise ValueError("target contains non-finite values")
-        if not self.args.min_goal_time <= goal_time <= self.args.max_goal_time:
-            raise ValueError(
-                f"goal_time must be between {self.args.min_goal_time:.2f}s and "
-                f"{self.args.max_goal_time:.2f}s"
-            )
-
         translation_delta = float(np.linalg.norm(pose[:3] - self.last_pose[:3]))
         rotation_delta = float(np.linalg.norm(pose[3:] - self.last_pose[3:]))
-        if translation_delta > self.args.max_translation_delta:
-            raise ValueError(
-                f"translation delta {translation_delta:.3f}m exceeds "
-                f"{self.args.max_translation_delta:.3f}m"
-            )
-        if rotation_delta > self.args.max_rotation_delta:
-            raise ValueError(
-                f"rotation delta {rotation_delta:.3f}rad exceeds "
-                f"{self.args.max_rotation_delta:.3f}rad"
-            )
-        return pose, goal_time
+        speed_limited_time = max(
+            self.args.min_goal_time,
+            goal_time,
+            translation_delta / self.args.max_translation_speed if translation_delta > 0 else 0.0,
+            rotation_delta / self.args.max_rotation_speed if rotation_delta > 0 else 0.0,
+        )
+        return pose, speed_limited_time
 
     def move(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -281,6 +272,12 @@ HTML = """<!doctype html>
     .pose strong { display: block; margin-top: 4px; font-variant-numeric: tabular-nums; font-size: 15px; }
     .nudge { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
     .nudge-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .waypoints { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .waypoint { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfd; }
+    .waypoint h3 { margin: 0 0 8px; font-size: 13px; }
+    .waypoint code { display: block; min-height: 78px; color: var(--muted); font-size: 11px; line-height: 1.35; white-space: pre-wrap; }
+    .waypoint .buttons { margin-top: 10px; gap: 6px; }
+    .waypoint button { padding: 7px 8px; font-size: 12px; }
     pre { min-height: 150px; max-height: 260px; overflow: auto; background: #111827; color: #e5e7eb; border-radius: 8px; padding: 12px; font-size: 12px; }
     .pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: #fff; font-size: 13px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
@@ -291,6 +288,7 @@ HTML = """<!doctype html>
       header { display: block; }
       .grid { grid-template-columns: 1fr; }
       .row, .nudge { grid-template-columns: 1fr; }
+      .waypoints { grid-template-columns: 1fr; }
       .pose { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   </style>
@@ -365,6 +363,14 @@ HTML = """<!doctype html>
   </section>
 
   <section style="margin-top:16px">
+    <h2>Positions sauvegardees</h2>
+    <div id="waypoints" class="waypoints" style="margin-top:14px"></div>
+    <div class="buttons">
+      <button class="danger" onclick="clearWaypoints()">Clear all</button>
+    </div>
+  </section>
+
+  <section style="margin-top:16px">
     <h2>Journal</h2>
     <pre id="log"></pre>
   </section>
@@ -372,7 +378,10 @@ HTML = """<!doctype html>
 
 <script>
 const keys = ["x", "y", "z", "rx", "ry", "rz"];
+const waypointStorageKey = "widowx_cartesian_waypoints_v1";
 let state = null;
+let waypoints = loadWaypoints();
+let refreshInFlight = false;
 
 function log(message, data) {
   const el = document.getElementById("log");
@@ -380,20 +389,24 @@ function log(message, data) {
   el.textContent = line + "\\n\\n" + el.textContent;
 }
 
-async function api(path, payload) {
-  const options = payload === undefined ? {} : {
+async function api(path, payload, options = {}) {
+  const silent = Boolean(options.silent);
+  const requestPath = payload === undefined
+    ? `${path}${path.includes("?") ? "&" : "?"}t=${Date.now()}`
+    : path;
+  const requestOptions = payload === undefined ? {} : {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload),
   };
-  const response = await fetch(path, options);
+  const response = await fetch(requestPath, requestOptions);
   const data = await response.json();
   if (!response.ok) throw data;
-  update(data);
+  update(data, silent);
   return data;
 }
 
-function update(data) {
+function update(data, silent = false) {
   state = data;
   const dot = document.getElementById("dot");
   dot.className = "dot" + (data.error ? " err" : data.connected ? " on" : "");
@@ -401,7 +414,8 @@ function update(data) {
   const pose = document.getElementById("pose");
   pose.innerHTML = keys.map((key, i) => `<div><span>${key}</span><strong>${Number(data.pose[i]).toFixed(4)}</strong></div>`).join("");
   document.getElementById("gravity_state").value = data.gravity_enabled ? "on" : "off";
-  log(data.message, data.error ? {error: data.error} : null);
+  renderWaypoints();
+  if (!silent) log(data.message, data.error ? {error: data.error} : null);
 }
 
 function currentTarget() {
@@ -419,8 +433,97 @@ function nudge(key, sign) {
   input.value = (Number(input.value || "0") + sign * step).toFixed(4);
 }
 
+function loadWaypoints() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(waypointStorageKey) || "[]");
+    return Array.from({length: 5}, (_, index) => Array.isArray(parsed[index]) && parsed[index].length === 6 ? parsed[index].map(Number) : null);
+  } catch {
+    return [null, null, null, null, null];
+  }
+}
+
+function saveWaypoints() {
+  localStorage.setItem(waypointStorageKey, JSON.stringify(waypoints));
+}
+
+function formatWaypoint(pose) {
+  if (!pose) return "empty";
+  return keys.map((key, i) => `${key}: ${Number(pose[i]).toFixed(4)}`).join("\\n");
+}
+
+function renderWaypoints() {
+  const container = document.getElementById("waypoints");
+  if (!container) return;
+  container.innerHTML = waypoints.map((pose, index) => `
+    <div class="waypoint">
+      <h3>Position ${index + 1}</h3>
+      <code>${formatWaypoint(pose)}</code>
+      <div class="buttons">
+        <button onclick="saveCurrentToSlot(${index})">Save ${index + 1}</button>
+        <button class="primary" onclick="goToSlot(${index})">Go ${index + 1}</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function savePoseToSlot(index, pose, label) {
+  if (!Array.isArray(pose) || pose.length !== 6 || pose.some(v => !Number.isFinite(Number(v)))) {
+    log("Position invalide", {pose});
+    return;
+  }
+  waypoints[index] = pose.map(Number);
+  saveWaypoints();
+  renderWaypoints();
+  log(`${label} saved to position ${index + 1}`, {pose: waypoints[index]});
+}
+
+async function saveCurrentToSlot(index) {
+  try {
+    const freshState = await api("/api/state");
+    savePoseToSlot(index, freshState.pose, "Current pose");
+  } catch (e) {
+    log("Erreur lecture avant sauvegarde", e);
+  }
+}
+
+async function goToSlot(index) {
+  const pose = waypoints[index];
+  if (!pose) {
+    log(`Position ${index + 1} empty`);
+    return;
+  }
+  keys.forEach((key, i) => document.getElementById(key).value = Number(pose[i]).toFixed(4));
+  try {
+    await api("/api/move", {
+      target: pose,
+      goal_time: Number(document.getElementById("goal_time").value || "2"),
+      interpolation: document.getElementById("interpolation").value,
+      blocking: true,
+    });
+  } catch (e) {
+    log(`Mouvement vers position ${index + 1} refuse`, e);
+  }
+}
+
+function clearWaypoints() {
+  waypoints = [null, null, null, null, null];
+  saveWaypoints();
+  renderWaypoints();
+  log("All 5 positions cleared");
+}
+
 async function connect() { try { await api("/api/connect", {}); copyCurrent(); } catch (e) { log("Erreur connexion", e); } }
-async function refreshState() { try { await api("/api/state"); } catch (e) { log("Erreur lecture", e); } }
+async function refreshState(silent = false) {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    await api("/api/state", undefined, {silent});
+  } catch (e) {
+    if (!silent) log("Erreur lecture", e);
+  } finally {
+    refreshInFlight = false;
+  }
+}
 async function idle() { try { await api("/api/idle", {}); } catch (e) { log("Erreur idle", e); } }
 async function disconnect() { try { await api("/api/disconnect", {}); } catch (e) { log("Erreur deconnexion", e); } }
 async function gravity(enabled) {
@@ -452,7 +555,11 @@ async function sendTarget() {
   }
 }
 
+renderWaypoints();
 refreshState().then(copyCurrent).catch(e => log("Initialisation", e));
+setInterval(() => {
+  if (state?.connected) refreshState(true);
+}, 700);
 </script>
 </body>
 </html>
@@ -467,15 +574,17 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
-            if self.path == "/" or self.path == "/index.html":
+            parsed_path = urlparse(self.path).path
+            if parsed_path == "/" or parsed_path == "/index.html":
                 body = HTML.encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path == "/api/state":
+            if parsed_path == "/api/state":
                 _json_response(self, HTTPStatus.OK, self.controller.read_state())
                 return
             _json_response(self, HTTPStatus.NOT_FOUND, {"error": "not found"})
@@ -516,11 +625,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--arm-port", type=int, default=50001, help="Arm controller TCP preflight port.")
     parser.add_argument("--timeout", type=float, default=2.0)
     parser.add_argument("--variant", choices=sorted(END_EFFECTORS), default="base")
-    parser.add_argument("--max-translation-delta", type=float, default=0.05)
-    parser.add_argument("--max-rotation-delta", type=float, default=0.35)
+    parser.add_argument("--max-translation-speed", type=float, default=0.05, help="Maximum Cartesian translation speed in m/s.")
+    parser.add_argument("--max-rotation-speed", type=float, default=0.35, help="Maximum Cartesian rotation speed in rad/s.")
     parser.add_argument("--max-camera-wrist-effort", type=float, default=0.6)
     parser.add_argument("--min-goal-time", type=float, default=0.5)
-    parser.add_argument("--max-goal-time", type=float, default=8.0)
     return parser.parse_args()
 
 

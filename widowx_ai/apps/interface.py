@@ -48,6 +48,7 @@ from .config import (
     START_POSITION_MIN_TIME,
 )
 from .hamster import HamsterService
+from .imitation import ImitationTrajectoryRunner
 from .lerobot_export import ActDatasetPlanner, LeRobotExportRunner
 
 try:
@@ -71,6 +72,9 @@ HAMSTER_HTML = (Path(__file__).resolve().parent / "pages" / "hamster.html").read
 
 
 DATASET_TRIM_HTML = (Path(__file__).resolve().parent / "pages" / "dataset_trim.html").read_text(encoding="utf-8")
+
+
+IMITATION_HTML = (Path(__file__).resolve().parent / "pages" / "imitation.html").read_text(encoding="utf-8")
 
 
 class CameraController:
@@ -2593,6 +2597,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     lerobot_export_runner: LeRobotExportRunner
     act_review_runner: ActReviewRunner
     hamster_service: HamsterService
+    imitation_runner: ImitationTrajectoryRunner
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}")
@@ -2658,6 +2663,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(HAMSTER_HTML.encode("utf-8"))
             return
+        if parsed.path == "/imitation":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(IMITATION_HTML.encode("utf-8"))
+            return
         if parsed.path == "/dataset-trim":
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2707,6 +2718,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/act_review/status":
             self.send_json(self.act_review_runner.status())
+            return
+        if parsed.path == "/api/hamster/status":
+            self.send_json(self.hamster_service.status())
+            return
+        if parsed.path == "/api/imitation/status":
+            self.send_json(self.imitation_runner.status())
             return
         if parsed.path == "/api/camera/frame":
             try:
@@ -2812,6 +2829,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "/api/lerobot_export/start": lambda: self.lerobot_export_runner.start(payload),
                 "/api/act_review/start": lambda: self.act_review_runner.start(payload),
                 "/api/hamster/send_camera": lambda: self.hamster_service.send_camera(payload),
+                "/api/hamster/start": lambda: self.hamster_service.start(payload),
+                "/api/hamster/stop": lambda: self.hamster_service.stop(payload),
+                "/api/hamster/status": lambda: self.hamster_service.status(payload),
+                "/api/imitation/start": lambda: self.imitation_runner.start(payload),
+                "/api/imitation/stop": self.imitation_runner.stop,
                 "/api/recording/load": lambda: self.recording_library.load(payload),
                 "/api/recording/trim": lambda: self.recording_library.trim(payload),
                 "/api/recording/delete": lambda: self.recording_library.delete(payload),
@@ -2829,6 +2851,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def emergency_stop(self) -> dict[str, Any]:
         self.dataset_capture_runner.force_stop()
         self.replay_runner.force_stop()
+        self.imitation_runner.force_stop()
         model_message = self.model_test_runner.force_stop()
         data = self.controller.emergency_stop()
         if model_message:
@@ -2884,6 +2907,7 @@ def main() -> int:
     lerobot_export_runner = LeRobotExportRunner(project_root, act_dataset_planner)
     act_review_runner = ActReviewRunner(project_root, act_dataset_planner)
     hamster_service = HamsterService(camera_controller)
+    imitation_runner = ImitationTrajectoryRunner(controller, teach_recorder)
     RequestHandler.controller = controller
     RequestHandler.camera_controller = camera_controller
     RequestHandler.teach_recorder = teach_recorder
@@ -2896,6 +2920,7 @@ def main() -> int:
     RequestHandler.lerobot_export_runner = lerobot_export_runner
     RequestHandler.act_review_runner = act_review_runner
     RequestHandler.hamster_service = hamster_service
+    RequestHandler.imitation_runner = imitation_runner
     server = ThreadingHTTPServer((args.host, args.port), RequestHandler)
     mode = "REAL ARM ENABLED" if args.real else "dry-run"
     print(f"WidowX AI interface running at http://{args.host}:{args.port} ({mode})")
