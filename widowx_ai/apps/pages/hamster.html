@@ -134,6 +134,33 @@
       grid-template-columns: minmax(0, 1fr);
       margin: 0;
     }
+    .server-controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 0 0 12px;
+    }
+    .server-controls button {
+      width: 100%;
+    }
+    .server-status {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      margin-bottom: 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .server-status strong {
+      color: var(--text);
+      font-size: 14px;
+    }
+    .server-status .ready { color: var(--accent); }
+    .server-status .stopped { color: var(--danger); }
     pre {
       min-height: 120px;
       max-height: 260px;
@@ -178,6 +205,7 @@
       </div>
       <div class="nav">
         <button onclick="location.href='/'">Control</button>
+        <button onclick="location.href='/imitation'">Imitation</button>
         <button onclick="location.href='/teach'">Teaching</button>
         <button onclick="location.href='/model-test'">Model test</button>
       </div>
@@ -203,8 +231,19 @@
       </section>
       <aside>
         <h2 class="side-title">Hamster</h2>
+        <div class="server-controls">
+          <button class="primary" onclick="startHamsterServer()">Start Hamster on DGX</button>
+          <button onclick="stopHamsterServer()">Stop Hamster</button>
+          <button onclick="refreshHamsterStatus(true)">Refresh status</button>
+          <button onclick="openHamsterWeb()">Open DGX web UI</button>
+        </div>
+        <div class="server-status" id="hamsterServerStatus">
+          <strong>Hamster server</strong>
+          <span>Checking DGX status...</span>
+        </div>
         <div class="hamster-panel">
           <input id="hamsterUrl" type="text" value="http://192.168.100.36:8000" aria-label="Hamster API URL">
+          <input id="dgxPassword" type="password" value="" placeholder="DGX SSH password" aria-label="DGX SSH password">
           <input id="hamsterPrompt" type="text" value="Move the tape to the target area" aria-label="Hamster quest">
           <button class="primary" onclick="sendCameraToHamster()">Send selected frame</button>
         </div>
@@ -226,6 +265,78 @@
       const output = document.getElementById('hamsterOutput');
       const stamp = new Date().toLocaleTimeString();
       output.textContent = `[${stamp}] ${msg}\n` + output.textContent;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+
+    function renderHamsterStatus(data) {
+      const status = document.getElementById('hamsterServerStatus');
+      const readyClass = data.backend_ready ? 'ready' : 'stopped';
+      const readyText = data.backend_ready ? 'READY' : 'STOPPED / STARTING';
+      const jobs = Array.isArray(data.jobs) && data.jobs.length ? data.jobs.join('\n') : 'No SLURM job found';
+      status.innerHTML = `
+        <strong>Hamster server <span class="${readyClass}">${readyText}</span></strong>
+        <span>${escapeHtml(data.message || '')}</span>
+        <span>API: ${escapeHtml(data.backend_url || document.getElementById('hamsterUrl').value)}</span>
+        <span>SLURM: ${escapeHtml(jobs)}</span>
+      `;
+      if (data.backend_url) document.getElementById('hamsterUrl').value = data.backend_url;
+    }
+
+    function dgxControlPayload() {
+      return {
+        password: document.getElementById('dgxPassword').value
+      };
+    }
+
+    async function refreshHamsterStatus(writeLog = false) {
+      try {
+        const data = await api('/api/hamster/status', dgxControlPayload());
+        renderHamsterStatus(data);
+        if (writeLog) log(data.message);
+      } catch (err) {
+        document.getElementById('hamsterServerStatus').innerHTML = `
+          <strong>Hamster server <span class="stopped">ERROR</span></strong>
+          <span>${err.message}</span>
+        `;
+        if (writeLog) log(`ERROR Hamster status: ${err.message}`);
+      }
+    }
+
+    async function startHamsterServer() {
+      try {
+        log('Starting Hamster on DGX through SLURM...');
+        const data = await api('/api/hamster/start', dgxControlPayload());
+        renderHamsterStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR Hamster start: ${err.message}`);
+        await refreshHamsterStatus(false);
+      }
+    }
+
+    async function stopHamsterServer() {
+      try {
+        log('Stopping Hamster SLURM job...');
+        const data = await api('/api/hamster/stop', dgxControlPayload());
+        renderHamsterStatus(data);
+        log(data.message);
+      } catch (err) {
+        log(`ERROR Hamster stop: ${err.message}`);
+        await refreshHamsterStatus(false);
+      }
+    }
+
+    function openHamsterWeb() {
+      window.open('http://192.168.100.36:7860', '_blank', 'noopener');
     }
 
     async function api(path, payload = null) {
@@ -429,7 +540,9 @@
     }
 
     refreshCameraHub(false);
+    refreshHamsterStatus(false);
     setInterval(() => refreshCameraHub(false), 2500);
+    setInterval(() => refreshHamsterStatus(false), 5000);
   </script>
 </body>
 </html>

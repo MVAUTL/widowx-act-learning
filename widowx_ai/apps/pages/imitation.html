@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hamster Imitation</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111315;
+      --panel: #181c20;
+      --panel-2: #22282d;
+      --text: #eef3f5;
+      --muted: #a6b0b8;
+      --accent: #39c68f;
+      --danger: #e45b5b;
+      --line: #2d363d;
+      --warn: #d7a941;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1280px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 36px;
+    }
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    h1 { margin: 0; font-size: 30px; line-height: 1.05; }
+    .sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+    .nav, .row, .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+      gap: 16px;
+      align-items: start;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button:hover { border-color: #52616b; }
+    button.primary { background: #1f5f49; border-color: #2b8c67; }
+    button.danger { background: #572628; border-color: #9b3a40; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--text);
+      padding: 9px 10px;
+      font-size: 14px;
+    }
+    textarea { min-height: 78px; resize: vertical; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .camera-view {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      margin-top: 12px;
+    }
+    .camera-view img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+    .camera-view img.live-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.58;
+      mix-blend-mode: screen;
+    }
+    .overlay {
+      margin-top: 12px;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #0b0d0f;
+      display: none;
+    }
+    .status {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .waypoints {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .point {
+      display: grid;
+      grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 44px;
+      padding: 8px;
+      background: #111518;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+    }
+    .point strong { font-size: 13px; }
+    .point span {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    pre {
+      min-height: 150px;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      margin: 12px 0 0;
+      padding: 12px;
+      background: #0b0d0f;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: #d8dee3;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .metric {
+      display: grid;
+      gap: 3px;
+      padding: 9px 10px;
+      background: #111518;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .metric strong { color: var(--text); font-size: 14px; }
+    .armed {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 12px;
+      background: #111518;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .armed input {
+      width: 18px;
+      height: 18px;
+      padding: 0;
+    }
+    .inline-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #111518;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .inline-control input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      padding: 0;
+    }
+    .inline-control input[type="range"] {
+      width: 110px;
+      padding: 0;
+    }
+    .grip-dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.35);
+      background: var(--danger);
+    }
+    .grip-dot.open { background: #4ba3ff; }
+    .counter-ok { color: var(--accent); }
+    .counter-bad { color: var(--danger); }
+    @media (max-width: 940px) {
+      header { flex-direction: column; align-items: stretch; }
+      .layout, .grid2 { grid-template-columns: 1fr; }
+      .point { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Hamster Imitation</h1>
+        <div class="sub">Plan Hamster, points guides par le bras, replay et enregistrement camera synchronise.</div>
+      </div>
+      <div class="nav">
+        <button onclick="location.href='/'">Control</button>
+        <button onclick="location.href='/hamster'">Hamster</button>
+        <button onclick="location.href='/teach'">Teaching</button>
+        <button onclick="location.href='/model-test'">Model test</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section>
+        <h2>Camera et plan Hamster</h2>
+        <div class="row">
+          <select id="cameraSource" onchange="handleCameraSourceChange()"></select>
+          <button onclick="refreshCameraHub(true)">Refresh</button>
+          <button onclick="startCameraPreview()">Start live</button>
+          <button onclick="stopCameraPreview()">Stop live</button>
+        </div>
+        <div class="camera-view">
+          <img id="cameraImage" alt="Camera preview" onload="cameraFramePending=false" onerror="cameraFramePending=false">
+          <img id="liveHamsterOverlay" class="live-overlay" alt="Hamster live overlay">
+          <span id="cameraPlaceholder">No camera selected</span>
+        </div>
+        <div class="status" id="cameraState">Scanning cameras</div>
+
+        <div class="grid2" style="margin-top: 14px;">
+          <label>Hamster API URL
+            <input id="hamsterUrl" value="http://192.168.100.36:8000">
+          </label>
+          <label>Nom de tache
+            <input id="taskName" value="hamster_imitation">
+          </label>
+        </div>
+        <label style="margin-top: 10px;">Nombre exact de points demande par Hamster
+          <input id="expectedPointCount" type="number" min="3" max="30" step="1" value="3" onchange="renderWaypoints()">
+        </label>
+        <label style="margin-top: 10px;">Prompt envoye a Hamster
+          <textarea id="hamsterPrompt">Observe the scene and draw the trajectory the robot gripper should follow. Return concise waypoint guidance.</textarea>
+        </label>
+        <div class="actions" style="margin-top: 10px;">
+          <button class="primary" onclick="sendCameraToHamster()">Envoyer frame a Hamster</button>
+          <button onclick="clearHamsterResult()">Clear plan</button>
+          <label class="inline-control"><input type="checkbox" id="showLiveOverlay" checked onchange="renderLiveOverlay()"> overlay live</label>
+          <label class="inline-control">opacite <input id="overlayOpacity" type="range" min="0.15" max="1" step="0.05" value="0.58" oninput="renderLiveOverlay()"></label>
+        </div>
+        <img class="overlay" id="hamsterOverlay" alt="Hamster trajectory overlay">
+        <pre id="hamsterAnswer">Hamster output will appear here.</pre>
+      </section>
+
+      <section>
+        <h2>Points et trajectoire robot</h2>
+        <div class="actions">
+          <button class="primary" onclick="connectArm()">Connect arm</button>
+          <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
+          <button onclick="toggleGravity(true)">Gravity on</button>
+          <button onclick="toggleGravity(false)">Gravity off</button>
+          <button class="danger" onclick="emergencyStop()">Stop</button>
+        </div>
+        <div class="grid2" style="margin-top: 10px;">
+          <div class="metric"><span>Robot</span><strong id="robotStatus">Unknown</strong></div>
+          <div class="metric"><span>Imitation</span><strong id="imitationStatus">Ready</strong></div>
+        </div>
+        <div class="grid2" style="margin-top: 10px;">
+          <label>Temps par segment (s)
+            <input id="moveTime" type="number" min="0.2" max="20" step="0.1" value="2.0">
+          </label>
+          <label>Pause point (s)
+            <input id="pauseTime" type="number" min="0" max="10" step="0.05" value="0.15">
+          </label>
+        </div>
+        <div class="actions" style="margin-top: 10px;">
+          <button class="primary" onclick="saveWaypoint()">Save point actuel</button>
+          <button onclick="clearWaypoints()">Clear points</button>
+        </div>
+        <div class="status" id="pointCountStatus"></div>
+        <div class="waypoints" id="waypoints"></div>
+        <div class="actions" style="margin-top: 12px;">
+          <button class="primary" onclick="runTrajectory(true)">Run + record</button>
+          <button onclick="runTrajectory(false)">Run only</button>
+          <button onclick="stopImitation()">Stop imitation</button>
+        </div>
+        <pre id="logOutput">Journal</pre>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    let cameraRunning = false;
+    let cameraTimer = null;
+    let cameraFramePending = false;
+    let waypoints = JSON.parse(localStorage.getItem('hamsterImitationWaypoints') || '[]');
+    let hamsterAnswer = '';
+    let hamsterOverlay = '';
+    const GRIPPER_OPEN_THRESHOLD_M = 0.015;
+
+    async function api(path, payload = null) {
+      const opts = payload ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      } : {};
+      const res = await fetch(path, opts);
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function log(message, detail = null) {
+      const output = document.getElementById('logOutput');
+      const stamp = new Date().toLocaleTimeString();
+      const extra = detail ? `\n${JSON.stringify(detail, null, 2)}` : '';
+      output.textContent = `[${stamp}] ${message}${extra}\n\n` + output.textContent;
+    }
+
+    function selectedCameraSource() {
+      return document.getElementById('cameraSource').value || '';
+    }
+
+    function renderCameraSources(sources, activeSource) {
+      const select = document.getElementById('cameraSource');
+      const previous = select.value;
+      select.innerHTML = '';
+      if (!Array.isArray(sources) || sources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No camera detected';
+        select.appendChild(option);
+        select.disabled = true;
+        return;
+      }
+      select.disabled = false;
+      sources.forEach((source) => {
+        const option = document.createElement('option');
+        option.value = source.id;
+        option.textContent = source.label;
+        select.appendChild(option);
+      });
+      const preferred = activeSource || previous;
+      select.value = sources.some((source) => source.id === preferred) ? preferred : sources[0].id;
+    }
+
+    async function refreshCameraHub(writeLog = false) {
+      try {
+        const data = await api('/api/video/status');
+        cameraRunning = data.running;
+        renderCameraSources(data.sources || [], data.active_source);
+        document.getElementById('cameraState').textContent = data.sources?.length
+          ? (data.running ? `Live actif - ${data.active_label}` : `${data.sources.length} camera(s) detectee(s)`)
+          : 'No camera detected';
+        updateCameraView();
+        if (writeLog) log(data.message);
+      } catch (err) {
+        log(`Erreur camera: ${err.message}`);
+      }
+    }
+
+    function cameraFrameUrl() {
+      const source = selectedCameraSource();
+      return source ? `/api/video/frame?source=${encodeURIComponent(source)}&t=${Date.now()}` : '';
+    }
+
+    function updateCameraFrame() {
+      if (!cameraRunning || cameraFramePending) return;
+      const url = cameraFrameUrl();
+      if (!url) return;
+      cameraFramePending = true;
+      document.getElementById('cameraImage').src = url;
+    }
+
+    function updateCameraView() {
+      const img = document.getElementById('cameraImage');
+      const placeholder = document.getElementById('cameraPlaceholder');
+      if (!cameraRunning || !selectedCameraSource()) {
+        if (cameraTimer) clearInterval(cameraTimer);
+        cameraTimer = null;
+        cameraFramePending = false;
+        img.style.display = 'none';
+        img.removeAttribute('src');
+        placeholder.style.display = 'block';
+        return;
+      }
+      img.style.display = 'block';
+      placeholder.style.display = 'none';
+      if (!cameraTimer) cameraTimer = setInterval(updateCameraFrame, 150);
+      updateCameraFrame();
+      renderLiveOverlay();
+    }
+
+    async function handleCameraSourceChange() {
+      if (cameraRunning) await startCameraPreview();
+    }
+
+    async function startCameraPreview() {
+      const source = selectedCameraSource();
+      if (!source) return log('Aucune camera selectionnee');
+      try {
+        const data = await api('/api/video/start', {source, width: 640, height: 480});
+        log(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`Erreur live camera: ${err.message}`);
+      }
+    }
+
+    async function stopCameraPreview() {
+      try {
+        const data = await api('/api/video/stop', {});
+        log(data.message);
+        await refreshCameraHub(false);
+      } catch (err) {
+        log(`Erreur stop camera: ${err.message}`);
+      }
+    }
+
+    async function sendCameraToHamster() {
+      const source = selectedCameraSource();
+      if (!source) return log('Selectionne une camera avant Hamster');
+      try {
+        if (!cameraRunning) await startCameraPreview();
+        document.getElementById('hamsterAnswer').textContent = 'Envoi vers Hamster...';
+        const data = await api('/api/hamster/send_camera', {
+          source,
+          base_url: document.getElementById('hamsterUrl').value.trim(),
+          prompt: document.getElementById('hamsterPrompt').value.trim()
+        });
+        hamsterAnswer = data.answer || JSON.stringify(data.raw_response, null, 2);
+        hamsterOverlay = data.output_image || '';
+        document.getElementById('hamsterAnswer').textContent = hamsterAnswer;
+        updateExpectedPointCountFromHamster(data.point_count, hamsterAnswer);
+        const img = document.getElementById('hamsterOverlay');
+        if (hamsterOverlay) {
+          img.src = hamsterOverlay;
+          img.style.display = 'block';
+        } else {
+          img.style.display = 'none';
+        }
+        renderLiveOverlay();
+        log('Plan Hamster recu');
+      } catch (err) {
+        document.getElementById('hamsterAnswer').textContent = `ERROR Hamster: ${err.message}`;
+        log(`Erreur Hamster: ${err.message}`);
+      }
+    }
+
+    function renderLiveOverlay() {
+      const overlay = document.getElementById('liveHamsterOverlay');
+      const enabled = document.getElementById('showLiveOverlay').checked;
+      overlay.style.opacity = document.getElementById('overlayOpacity').value;
+      if (enabled && hamsterOverlay && cameraRunning) {
+        if (overlay.src !== hamsterOverlay) overlay.src = hamsterOverlay;
+        overlay.style.display = 'block';
+      } else {
+        overlay.style.display = 'none';
+      }
+    }
+
+    function clearHamsterResult() {
+      hamsterAnswer = '';
+      hamsterOverlay = '';
+      document.getElementById('hamsterAnswer').textContent = 'Hamster output will appear here.';
+      document.getElementById('hamsterOverlay').style.display = 'none';
+      renderLiveOverlay();
+    }
+
+    function saveWaypoints() {
+      localStorage.setItem('hamsterImitationWaypoints', JSON.stringify(waypoints));
+    }
+
+    function expectedPointCount() {
+      const value = Number(document.getElementById('expectedPointCount').value);
+      return Number.isFinite(value) ? Math.trunc(value) : 0;
+    }
+
+    function updateExpectedPointCountFromHamster(serverCount, answer) {
+      const parsedCount = Number(serverCount);
+      const tupleMatches = String(answer || '').match(/\(\s*[-+]?\d*\.?\d+\s*,\s*[-+]?\d*\.?\d+\s*\)/g);
+      const explicit = String(answer || '').match(/\b(\d{1,2})\s*(?:points?|waypoints?|poses?|positions?)\b/i);
+      const numbered = String(answer || '').match(/(?:^|\n)\s*\d+[\).:-]/g);
+      const detected = Number.isFinite(parsedCount) && parsedCount >= 3
+        ? parsedCount
+        : tupleMatches && tupleMatches.length >= 3
+        ? tupleMatches.length
+        : explicit
+        ? Number(explicit[1])
+        : numbered && numbered.length >= 3
+        ? numbered.length
+        : null;
+      if (detected && detected >= 3 && detected <= 30) {
+        document.getElementById('expectedPointCount').value = detected;
+        log(`Nombre de points Hamster actualise: ${detected}`);
+        renderWaypoints();
+      } else {
+        log('Impossible de detecter automatiquement le nombre de points Hamster');
+      }
+    }
+
+    function formatPositions(positions) {
+      return positions.map((value) => Number(value).toFixed(3)).join(', ');
+    }
+
+    function gripperIsOpen(position) {
+      return Number.isFinite(Number(position)) && Number(position) >= GRIPPER_OPEN_THRESHOLD_M;
+    }
+
+    function formatGripper(position) {
+      if (position == null || !Number.isFinite(Number(position))) return 'gripper n/a';
+      return `${gripperIsOpen(position) ? 'ouvert' : 'ferme'} · ${(Number(position) * 1000).toFixed(1)} mm`;
+    }
+
+    function renderWaypoints() {
+      const container = document.getElementById('waypoints');
+      const expected = expectedPointCount();
+      const count = waypoints.length;
+      const status = document.getElementById('pointCountStatus');
+      const ok = expected >= 3 && count === expected;
+      status.innerHTML = `Points sauvegardes: <span class="${ok ? 'counter-ok' : 'counter-bad'}">${count}/${expected || '?'}</span>`;
+      container.innerHTML = '';
+      if (waypoints.length === 0) {
+        container.innerHTML = '<div class="status">Aucun point enregistre. Guide le bras puis clique Save point actuel.</div>';
+        return;
+      }
+      waypoints.forEach((point, index) => {
+        const row = document.createElement('div');
+        row.className = 'point';
+        const gripOpen = gripperIsOpen(point.gripper_position);
+        row.innerHTML = `
+          <strong>Point ${index + 1}</strong>
+          <span class="grip-dot ${gripOpen ? 'open' : ''}" title="${gripOpen ? 'pince ouverte' : 'pince fermee'}"></span>
+          <span>${formatPositions(point.positions)} · ${formatGripper(point.gripper_position)}</span>
+          <button onclick="movePoint(${index}, -1)" ${index === 0 ? 'disabled' : ''}>Up</button>
+          <button onclick="removePoint(${index})">Clear</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    async function saveWaypoint() {
+      try {
+        const expected = expectedPointCount();
+        if (expected >= 3 && waypoints.length >= expected) {
+          throw new Error(`Hamster demande exactement ${expected} points. Efface un point avant d'en ajouter un autre.`);
+        }
+        const data = await api('/api/status');
+        if (!data.connected) throw new Error('Robot non connecte');
+        waypoints.push({
+          positions: data.positions,
+          gripper_position: data.gripper_position,
+          saved_at: new Date().toISOString()
+        });
+        saveWaypoints();
+        renderWaypoints();
+        log(`Point ${waypoints.length} sauvegarde`, {
+          positions: data.positions,
+          gripper_position: data.gripper_position,
+          gripper_state: gripperIsOpen(data.gripper_position) ? 'open' : 'closed'
+        });
+      } catch (err) {
+        log(`Erreur sauvegarde point: ${err.message}`);
+      }
+    }
+
+    function removePoint(index) {
+      waypoints.splice(index, 1);
+      saveWaypoints();
+      renderWaypoints();
+    }
+
+    function movePoint(index, delta) {
+      const next = index + delta;
+      if (next < 0 || next >= waypoints.length) return;
+      [waypoints[index], waypoints[next]] = [waypoints[next], waypoints[index]];
+      saveWaypoints();
+      renderWaypoints();
+    }
+
+    function clearWaypoints() {
+      waypoints = [];
+      saveWaypoints();
+      renderWaypoints();
+      log('Points effaces');
+    }
+
+    async function connectArm() {
+      try {
+        const data = await api('/api/connect', {});
+        log(data.message);
+        renderRobotStatus(data);
+      } catch (err) {
+        log(`Erreur connect: ${err.message}`);
+      }
+    }
+
+    async function toggleGravity(enabled) {
+      if (!document.getElementById('armed').checked) {
+        log('Coche enable motion avant de changer Gravity');
+        return;
+      }
+      try {
+        const payload = {
+          armed: document.getElementById('armed').checked,
+          payload_profile: 'd405_follower',
+          camera_wrist_effort: 0
+        };
+        const data = enabled
+          ? await api('/api/gravity_compensation', payload)
+          : await api('/api/hold', {...payload, enabled: true});
+        log(data.message);
+        renderRobotStatus(data);
+      } catch (err) {
+        log(`Erreur gravity: ${err.message}`);
+      }
+    }
+
+    function renderRobotStatus(data) {
+      const text = data.connected ? `Connected - speed ${Number(data.max_speed).toFixed(2)} rad/s` : 'Disconnected';
+      document.getElementById('robotStatus').textContent = text;
+    }
+
+    async function refreshRobotStatus() {
+      try {
+        renderRobotStatus(await api('/api/status'));
+      } catch (err) {
+        document.getElementById('robotStatus').textContent = err.message;
+      }
+    }
+
+    async function refreshImitationStatus() {
+      try {
+        const data = await api('/api/imitation/status');
+        document.getElementById('imitationStatus').textContent = data.running
+          ? `Running ${data.point_index}/${data.point_count}`
+          : (data.session_dir ? `Done - ${data.session_dir.split('/').pop()}` : 'Ready');
+      } catch (err) {
+        document.getElementById('imitationStatus').textContent = err.message;
+      }
+    }
+
+    async function runTrajectory(record) {
+      const expected = expectedPointCount();
+      if (waypoints.length < 3) return log('Il faut au moins 3 points pour lancer la trajectoire');
+      if (expected < 3) return log('Indique le nombre exact de points demande par Hamster');
+      if (waypoints.length !== expected) return log(`Hamster demande exactement ${expected} points, tu en as sauvegarde ${waypoints.length}`);
+      if (record && !selectedCameraSource()) return log('Selectionne une camera avant Run + record');
+      if (!document.getElementById('armed').checked) return log('Coche enable motion avant de lancer le mouvement');
+      try {
+        const data = await api('/api/imitation/start', {
+          armed: document.getElementById('armed').checked,
+          waypoints,
+          expected_count: expected,
+          record,
+          video_source: selectedCameraSource(),
+          move_time: Number(document.getElementById('moveTime').value),
+          pause_time: Number(document.getElementById('pauseTime').value),
+          task_name: document.getElementById('taskName').value.trim(),
+          session_name: `${document.getElementById('taskName').value.trim() || 'hamster_imitation'}_${new Date().toISOString().replace(/[:.]/g, '-')}`,
+          hamster_prompt: document.getElementById('hamsterPrompt').value.trim(),
+          hamster_answer: hamsterAnswer,
+          hamster_overlay: hamsterOverlay
+        });
+        log(record ? 'Trajectoire lancee avec enregistrement' : 'Trajectoire lancee', data);
+      } catch (err) {
+        log(`Erreur trajectoire: ${err.message}`);
+      }
+    }
+
+    async function stopImitation() {
+      try {
+        const data = await api('/api/imitation/stop', {});
+        log(data.message);
+      } catch (err) {
+        log(`Erreur stop imitation: ${err.message}`);
+      }
+    }
+
+    async function emergencyStop() {
+      try {
+        const data = await api('/api/emergency_stop', {});
+        log(data.message);
+      } catch (err) {
+        log(`Erreur emergency stop: ${err.message}`);
+      }
+    }
+
+    renderWaypoints();
+    refreshCameraHub(false);
+    refreshRobotStatus();
+    refreshImitationStatus();
+    setInterval(() => refreshCameraHub(false), 3000);
+    setInterval(refreshRobotStatus, 1500);
+    setInterval(refreshImitationStatus, 800);
+  </script>
+</body>
+</html>

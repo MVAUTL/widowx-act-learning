@@ -267,10 +267,14 @@ def _crop_center_square(img: Image.Image) -> Image.Image:
     top = (h - s) // 2
     return img.crop((left, top, left + s, top + s))
 
-def _load_image_tensor(image_path: Path, image_size: int) -> torch.Tensor:
+def _load_image_tensor(image_path: Path, image_size: tuple[int, int] | int) -> torch.Tensor:
     image = Image.open(image_path).convert("RGB")
-    image = _crop_center_square(image)
-    image = image.resize((image_size, image_size), Image.Resampling.BILINEAR)
+    is_square = True
+    if isinstance(image_size, tuple) and image_size[0] != image_size[1]:
+        is_square = False
+    if is_square:
+        image = _crop_center_square(image)
+    image = image.resize(image_size if isinstance(image_size, tuple) else (image_size, image_size), Image.Resampling.BILINEAR)
     array = np.asarray(image, dtype=np.float32) / 255.0
     array = np.transpose(array, (2, 0, 1))
     return torch.from_numpy(array).unsqueeze(0)
@@ -299,13 +303,17 @@ class RealSenseColor:
             self.pipeline.stop()
             self.started = False
 
-    def image_tensor(self, image_size: int) -> torch.Tensor:
+    def image_tensor(self, image_size: tuple[int, int] | int) -> torch.Tensor:
         frames = self.pipeline.wait_for_frames()
         frame = frames.get_color_frame()
         if not frame:
             raise RuntimeError("No RealSense color frame received.")
         image = Image.fromarray(np.asanyarray(frame.get_data())).convert("RGB")
-        image = _crop_center_square(image)
+        is_square = True
+        if isinstance(image_size, tuple) and image_size[0] != image_size[1]:
+            is_square = False
+        if is_square:
+            image = _crop_center_square(image)
         image = image.resize(image_size if isinstance(image_size, tuple) else (image_size, image_size), Image.Resampling.BILINEAR)
         array = np.asarray(image, dtype=np.float32) / 255.0
         array = np.transpose(array, (2, 0, 1))
@@ -347,7 +355,11 @@ class USBCamera:
         if not ret:
             raise RuntimeError("No USB camera frame received.")
         image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        image = _crop_center_square(image)
+        is_square = True
+        if isinstance(image_size, tuple) and image_size[0] != image_size[1]:
+            is_square = False
+        if is_square:
+            image = _crop_center_square(image)
         image = image.resize(image_size if isinstance(image_size, tuple) else (image_size, image_size), Image.Resampling.BILINEAR)
         array = np.asarray(image, dtype=np.float32) / 255.0
         array = np.transpose(array, (2, 0, 1))
