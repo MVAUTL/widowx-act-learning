@@ -29,14 +29,30 @@ function trajectorySvgDataUri(points) {
 }
 
 function renderLiveOverlay() {
-  const overlay = document.getElementById('liveHamsterOverlay');
+  const trajectoryOverlay = document.getElementById('liveHamsterOverlay');
+  const imageOverlay = document.getElementById('liveHamsterImageOverlay');
+  const mode = document.getElementById('overlayMode')?.value || 'trajectory';
+  const opacity = Number(document.getElementById('overlayOpacity')?.value || 0.55);
   const dataUri = trajectorySvgDataUri(imitationTrajectoryPoints);
-  if (dataUri && cameraRunning) {
-    if (overlay.src !== dataUri) overlay.src = dataUri;
-    overlay.style.opacity = '1';
-    overlay.style.mixBlendMode = 'normal';
-    overlay.style.display = 'block';
-  } else {
-    overlay.style.display = 'none';
+
+  trajectoryOverlay.style.display = 'none';
+  imageOverlay.style.display = 'none';
+  if (!cameraRunning) return;
+
+  if (mode === 'image' && hamsterOverlay) {
+    if (imageOverlay.src !== hamsterOverlay) imageOverlay.src = hamsterOverlay;
+    imageOverlay.style.objectFit = 'fill';
+    imageOverlay.style.opacity = String(opacity);
+    imageOverlay.style.mixBlendMode = 'normal';
+    imageOverlay.style.display = 'block';
+    return;
+  }
+
+  if (dataUri) {
+    if (trajectoryOverlay.src !== dataUri) trajectoryOverlay.src = dataUri;
+    trajectoryOverlay.style.objectFit = 'fill';
+    trajectoryOverlay.style.opacity = '1';
+    trajectoryOverlay.style.mixBlendMode = 'normal';
+    trajectoryOverlay.style.display = 'block';
   }
 }

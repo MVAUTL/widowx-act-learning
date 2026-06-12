@@ -13,6 +13,10 @@ import numpy as np
 
 
 class ImitationTrajectoryRunner:
+    GRIPPER_OPEN_THRESHOLD_M = 0.015
+    GRIPPER_OPEN_POSITION_M = 0.0375
+    GRIPPER_CLOSED_POSITION_M = 0.0
+
     def __init__(self, arm: Any, recorder: Any) -> None:
         self.arm = arm
         self.recorder = recorder
@@ -78,10 +82,14 @@ class ImitationTrajectoryRunner:
                     if isinstance(point, dict)
                     else None
                 )
+                gripper_action = str(point.get("gripper_action") or "").strip().lower() if isinstance(point, dict) else ""
+                if gripper_action not in {"", "open", "close"}:
+                    raise RuntimeError(f"Unknown gripper action: {gripper_action}")
                 waypoints.append(
                     {
                         "positions": self.arm._validated_positions(raw_positions),
                         "gripper_position": gripper_position,
+                        "gripper_action": gripper_action or None,
                     }
                 )
             except Exception as exc:
@@ -181,6 +189,20 @@ class ImitationTrajectoryRunner:
         except Exception:
             pass
 
+    def _wait(self, duration: float) -> bool:
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            if self.stop_event.is_set():
+                return False
+            time.sleep(0.02)
+        return True
+
+    @classmethod
+    def _gripper_is_open(cls, position: float | None) -> bool | None:
+        if position is None:
+            return None
+        return position >= cls.GRIPPER_OPEN_THRESHOLD_M
+
     def _run(
         self,
         waypoints: list[dict[str, Any]],
@@ -199,6 +221,9 @@ class ImitationTrajectoryRunner:
                 self._save_reference_assets(payload, self.session_dir)
                 time.sleep(0.25)
             self.arm.prepare_replay()
+            current_gripper = self.arm.replay_current_gripper_position()
+            current_gripper_open = self._gripper_is_open(current_gripper)
+            last_commanded_action: str | None = None
             for index, point in enumerate(waypoints, start=1):
                 if self.stop_event.is_set():
                     break
@@ -208,13 +233,36 @@ class ImitationTrajectoryRunner:
                 actual_move_time = self.arm.replay_position(
                     point["positions"],
                     move_time,
-                    point.get("gripper_position"),
+                    None,
                 )
-                deadline = time.monotonic() + actual_move_time + pause_time
-                while time.monotonic() < deadline:
-                    if self.stop_event.is_set():
+                if not self._wait(actual_move_time):
+                    break
+
+                gripper_action = point.get("gripper_action")
+                target_gripper = (
+                    self.GRIPPER_OPEN_POSITION_M
+                    if gripper_action == "open"
+                    else self.GRIPPER_CLOSED_POSITION_M
+                    if gripper_action == "close"
+                    else point.get("gripper_position")
+                )
+                target_gripper_open = self._gripper_is_open(target_gripper)
+                action_changed = gripper_action is not None and gripper_action != last_commanded_action
+                recorded_state_changed = gripper_action is None and target_gripper_open != current_gripper_open
+                if target_gripper_open is not None and (action_changed or recorded_state_changed):
+                    with self.lock:
+                        action = "Opening" if target_gripper_open else "Closing"
+                        self.last_message = f"{action} gripper at imitation point {index}/{len(waypoints)}"
+                    gripper_move_time = self.arm.replay_gripper_position(target_gripper)
+                    current_gripper = target_gripper
+                    current_gripper_open = target_gripper_open
+                    if gripper_action is not None:
+                        last_commanded_action = gripper_action
+                    if not self._wait(gripper_move_time):
                         break
-                    time.sleep(0.02)
+
+                if not self._wait(pause_time):
+                    break
             if recording_started:
                 record_status = self.recorder.stop()
                 with self.lock:

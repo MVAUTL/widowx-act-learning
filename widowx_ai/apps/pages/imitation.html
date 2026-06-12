@@ -112,6 +112,7 @@
     .camera-view img.live-overlay {
       position: absolute;
       inset: 0;
+      object-fit: fill;
       pointer-events: none;
       opacity: 0.58;
       mix-blend-mode: screen;
@@ -217,6 +218,11 @@
       width: 110px;
       padding: 0;
     }
+    .inline-control select {
+      width: auto;
+      min-width: 180px;
+      padding: 6px 8px;
+    }
     .grip-dot {
       width: 13px;
       height: 13px;
@@ -239,7 +245,7 @@
     .review-view {
       position: relative;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      aspect-ratio: 4 / 3;
       margin-top: 12px;
       overflow: hidden;
       display: grid;
@@ -302,12 +308,24 @@
           <button onclick="startCameraPreview()">Start live</button>
           <button onclick="stopCameraPreview()">Stop live</button>
         </div>
-        <div class="camera-view">
-          <img id="cameraImage" alt="Camera preview" onload="cameraFramePending=false" onerror="cameraFramePending=false">
+        <div class="camera-view" id="cameraView">
+          <img id="cameraImage" alt="Camera preview" onload="handleCameraImageLoad(this)" onerror="cameraFramePending=false">
           <img id="liveHamsterOverlay" class="live-overlay" alt="Hamster live overlay">
+          <img id="liveHamsterImageOverlay" class="live-overlay" alt="Hamster image overlay">
           <span id="cameraPlaceholder">No camera selected</span>
         </div>
         <div class="status" id="cameraState">Scanning cameras</div>
+        <div class="actions" style="margin-top: 10px;">
+          <label class="inline-control">Affichage
+            <select id="overlayMode" onchange="renderLiveOverlay()">
+              <option value="trajectory">Trace precis</option>
+              <option value="image">Deux images superposees</option>
+            </select>
+          </label>
+          <label class="inline-control">Opacite image
+            <input id="overlayOpacity" type="range" min="0.1" max="1" step="0.05" value="0.55" oninput="renderLiveOverlay()">
+          </label>
+        </div>
 
         <div class="grid2" style="margin-top: 14px;">
           <label>Hamster API URL
@@ -339,6 +357,7 @@
           <label class="armed"><input type="checkbox" id="armed"> enable motion</label>
           <button onclick="toggleGravity(true)">Gravity on</button>
           <button onclick="toggleGravity(false)">Gravity off</button>
+          <button onclick="goToStartPosition()">Go to initial position</button>
           <button class="danger" onclick="emergencyStop()">Stop</button>
         </div>
         <div class="grid2" style="margin-top: 10px;">
@@ -378,8 +397,8 @@
         <button onclick="nextImitationRecording()">Next</button>
         <button onclick="refreshImitationRecordings()">Refresh</button>
       </div>
-      <div class="review-view">
-        <img id="imitationReviewImage" alt="Recorded imitation frame">
+      <div class="review-view" id="imitationReviewView">
+        <img id="imitationReviewImage" alt="Recorded imitation frame" onload="syncImitationReviewAspect(this)">
         <span id="imitationReviewPlaceholder">Aucun enregistrement imitation selectionne</span>
       </div>
       <div class="review-controls">
@@ -480,6 +499,20 @@
       document.getElementById('cameraImage').src = url;
     }
 
+    function syncViewAspect(containerId, image) {
+      if (!image?.naturalWidth || !image?.naturalHeight) return;
+      document.getElementById(containerId).style.aspectRatio = `${image.naturalWidth} / ${image.naturalHeight}`;
+    }
+
+    function handleCameraImageLoad(image) {
+      cameraFramePending = false;
+      syncViewAspect('cameraView', image);
+    }
+
+    function syncImitationReviewAspect(image) {
+      syncViewAspect('imitationReviewView', image);
+    }
+
     function updateCameraView() {
       const img = document.getElementById('cameraImage');
       const placeholder = document.getElementById('cameraPlaceholder');
@@ -540,6 +573,7 @@
         hamsterOverlay = data.output_image || '';
         hamsterPoints = data.points || [];
         setImitationTrajectory(hamsterPoints);
+        renderWaypoints();
         document.getElementById('hamsterAnswer').textContent = hamsterAnswer;
         updateExpectedPointCountFromHamster(data.point_count, hamsterAnswer);
         const img = document.getElementById('hamsterOverlay');
@@ -562,6 +596,7 @@
       hamsterOverlay = '';
       hamsterPoints = [];
       setImitationTrajectory([]);
+      renderWaypoints();
       document.getElementById('hamsterAnswer').textContent = 'Hamster output will appear here.';
       document.getElementById('hamsterOverlay').style.display = 'none';
       renderLiveOverlay();
@@ -607,6 +642,11 @@
       return Number.isFinite(Number(position)) && Number(position) >= GRIPPER_OPEN_THRESHOLD_M;
     }
 
+    function hamsterActionForPoint(index) {
+      const action = String(hamsterPoints[index]?.gripper_action || '').toLowerCase();
+      return action === 'open' || action === 'close' ? action : null;
+    }
+
     function formatGripper(position) {
       if (position == null || !Number.isFinite(Number(position))) return 'gripper n/a';
       return `${gripperIsOpen(position) ? 'ouvert' : 'ferme'} · ${(Number(position) * 1000).toFixed(1)} mm`;
@@ -627,11 +667,15 @@
       waypoints.forEach((point, index) => {
         const row = document.createElement('div');
         row.className = 'point';
-        const gripOpen = gripperIsOpen(point.gripper_position);
+        const hamsterAction = hamsterActionForPoint(index);
+        const gripOpen = hamsterAction ? hamsterAction === 'open' : gripperIsOpen(point.gripper_position);
+        const gripLabel = hamsterAction
+          ? `${hamsterAction === 'open' ? 'ouverture maximale' : 'fermeture'} demandee par Hamster`
+          : formatGripper(point.gripper_position);
         row.innerHTML = `
           <strong>Point ${index + 1}</strong>
           <span class="grip-dot ${gripOpen ? 'open' : ''}" title="${gripOpen ? 'pince ouverte' : 'pince fermee'}"></span>
-          <span>${formatPositions(point.positions)} · ${formatGripper(point.gripper_position)}</span>
+          <span>${formatPositions(point.positions)} · ${gripLabel}</span>
           <button onclick="movePoint(${index}, -1)" ${index === 0 ? 'disabled' : ''}>Up</button>
           <button onclick="removePoint(${index})">Clear</button>
         `;
@@ -716,6 +760,22 @@
       }
     }
 
+    async function goToStartPosition() {
+      if (!document.getElementById('armed').checked) {
+        log('Coche enable motion avant de revenir a la position initiale');
+        return;
+      }
+      try {
+        const data = await api('/api/start_position/go', {
+          armed: document.getElementById('armed').checked
+        });
+        log(data.message || 'Mouvement vers la position initiale termine', data);
+        renderRobotStatus(data);
+      } catch (err) {
+        log(`Erreur position initiale: ${err.message}`);
+      }
+    }
+
     function renderRobotStatus(data) {
       const text = data.connected ? `Connected - speed ${Number(data.max_speed).toFixed(2)} rad/s` : 'Disconnected';
       document.getElementById('robotStatus').textContent = text;
@@ -749,9 +809,13 @@
       if (record && !selectedCameraSource()) return log('Selectionne une camera avant Run + record');
       if (!document.getElementById('armed').checked) return log('Coche enable motion avant de lancer le mouvement');
       try {
+        const executionWaypoints = waypoints.map((point, index) => ({
+          ...point,
+          gripper_action: hamsterActionForPoint(index)
+        }));
         const data = await api('/api/imitation/start', {
           armed: document.getElementById('armed').checked,
-          waypoints,
+          waypoints: executionWaypoints,
           expected_count: expected,
           record,
           video_source: selectedCameraSource(),
