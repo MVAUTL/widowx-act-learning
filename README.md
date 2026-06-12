@@ -4,9 +4,10 @@ Local tools for controlling a Trossen Robotics WidowX AI arm, recording teaching
 
 Full documentation:
 
-- English: [docs/README.en.md](docs/README.en.md)
-- French: [docs/README.fr.md](docs/README.fr.md)
-- HAMSTER/VILA on DGX Spark: [docs/hamster_dgx_spark.fr.md](docs/hamster_dgx_spark.fr.md)
+- English: [docs/readme_en.md](docs/readme_en.md)
+- French: [docs/readme_fr.md](docs/readme_fr.md)
+- HAMSTER/VILA on DGX Spark: [docs/hamster_dgx_spark_fr.md](docs/hamster_dgx_spark_fr.md)
+- LeRobot local setup: [docs/lerobot/README.md](docs/lerobot/README.md)
 - Research links and papers: [docs/research/README.md](docs/research/README.md)
 
 ## Project Layout
@@ -14,9 +15,16 @@ Full documentation:
 ```text
 .
 ├── README.md
+├── assets/
+│   ├── cad/           # Mechanical CAD models
+│   └── images/        # Project reference images
 ├── docs/
-│   ├── README.en.md
-│   └── README.fr.md
+│   ├── lerobot/
+│   ├── research/
+│   ├── readme_en.md
+│   └── readme_fr.md
+├── scripts/           # Conversion and monitoring utilities
+├── slurm/             # DGX training jobs
 ├── requirements.txt
 └── widowx_ai/
     ├── apps/          # Local web UI
@@ -465,7 +473,7 @@ rsync -avzP -e 'ssh -o StrictHostKeyChecking=no' guest@192.168.100.36:~/intern_m
 ```
 
 More DGX/HAMSTER notes are in
-[`docs/hamster_dgx_spark.fr.md`](docs/hamster_dgx_spark.fr.md).
+[`docs/hamster_dgx_spark_fr.md`](docs/hamster_dgx_spark_fr.md).
 
 ## NVIDIA DGX Spark HAMSTER Server
 

@@ -60,6 +60,22 @@
       justify-content: space-between;
       font-size: 14px;
     }
+    .header-side {
+      display: grid;
+      gap: 10px;
+      justify-items: end;
+    }
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .nav button {
+      height: 36px;
+      padding: 0 12px;
+      font-size: 13px;
+    }
     .status-main {
       display: inline-flex;
       align-items: center;
@@ -108,6 +124,38 @@
       color: var(--muted);
       font-size: 13px;
       line-height: 1.35;
+    }
+    .quick-record {
+      width: 100%;
+      display: none;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-top: 2px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }
+    .quick-record.open { display: grid; }
+    .quick-record-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .quick-record-row.two {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .quick-record label {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .quick-record input {
+      height: 36px;
+    }
+    .quick-record button {
+      height: 36px;
+      padding: 0 10px;
+      font-size: 13px;
     }
     .tool-label {
       min-width: 92px;
@@ -309,6 +357,8 @@
     }
     @media (max-width: 880px) {
       header { align-items: stretch; flex-direction: column; }
+      .header-side { justify-items: stretch; }
+      .nav { justify-content: flex-start; }
       .layout { grid-template-columns: 1fr; }
       .toolbar { grid-template-columns: 1fr; }
       .joint { grid-template-columns: 56px 1fr 82px; gap: 8px; }
@@ -324,7 +374,16 @@
         <h1>WidowX AI Control</h1>
         <div class="sub" id="subtitle"></div>
       </div>
-      <div class="status"><span class="status-main"><span class="dot warn" id="dot"></span> <span id="state">Initializing</span></span><span id="mode"></span></div>
+      <div class="header-side">
+        <div class="nav">
+          <button onclick="location.href='/teach'">Teaching</button>
+          <button onclick="location.href='/dataset-trim'">Trim + export</button>
+          <button onclick="location.href='/model-test'">Model test</button>
+          <button onclick="location.href='/hamster'">Hamster</button>
+          <button onclick="location.href='/imitation'">Imitation</button>
+        </div>
+        <div class="status"><span class="status-main"><span class="dot warn" id="dot"></span> <span id="state">Initializing</span></span><span id="mode"></span></div>
+      </div>
     </header>
     <div class="layout">
       <section>
@@ -341,7 +400,6 @@
             <span class="tool-label">Positions</span>
             <button onclick="home()">Home</button>
             <button onclick="goToStartPosition()">Start position</button>
-            <button onclick="saveStartPosition()">Save start</button>
             <button onclick="rest()">Rest</button>
           </div>
           <div class="tool-group">
@@ -354,12 +412,26 @@
             <span class="tool-label">Tools</span>
             <button onclick="gravityCompensation()">Gravity comp</button>
             <button id="holdButton" onclick="toggleHold()">Hold</button>
-            <button onclick="location.href='/teach'">Teaching</button>
-            <button onclick="location.href='/dataset-trim'">Trim dataset</button>
-            <button onclick="location.href='/lerobot-export'">LeRobot export</button>
-            <button onclick="location.href='/model-test'">Model test</button>
-            <button onclick="location.href='/hamster'">Hamster</button>
-            <button onclick="location.href='/imitation'">Imitation</button>
+            <button onclick="toggleQuickRecordMenu()">Record/replay</button>
+            <div id="quickRecordMenu" class="quick-record">
+              <div class="quick-record-row">
+                <input id="quickRecordName" type="text" value="" placeholder="movement name">
+                <button class="primary" onclick="startQuickRecording()">Start rec</button>
+                <button onclick="stopQuickRecording()">Stop</button>
+              </div>
+              <div class="quick-record-row two">
+                <select id="quickRecordingSelect"></select>
+                <button onclick="refreshQuickRecordings(true)">Refresh</button>
+              </div>
+              <div class="quick-record-row">
+                <label>Replay speed
+                  <input id="quickReplaySpeed" type="number" min="0.1" max="1" step="0.05" value="0.75">
+                </label>
+                <button class="primary" onclick="startQuickReplay()">Replay</button>
+                <button onclick="stopQuickReplay()">Stop replay</button>
+              </div>
+              <div class="tool-meta" id="quickRecordState">Record a motion, then replay it with enable motion checked.</div>
+            </div>
           </div>
         </div>
         <div id="joints"></div>
@@ -541,6 +613,121 @@
         payload_profile: 'd405_follower',
         camera_wrist_effort: 0.0
       };
+    }
+
+    function quickRecordName() {
+      const raw = document.getElementById('quickRecordName').value.trim();
+      const cleaned = raw.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[_ .-]+|[_ .-]+$/g, '');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      return cleaned || `quick_motion_${stamp}`;
+    }
+
+    function setQuickRecordState(message) {
+      const el = document.getElementById('quickRecordState');
+      if (el) el.textContent = message;
+    }
+
+    function toggleQuickRecordMenu() {
+      const menu = document.getElementById('quickRecordMenu');
+      menu.classList.toggle('open');
+      if (menu.classList.contains('open')) refreshQuickRecordings(false);
+    }
+
+    async function startQuickRecording() {
+      try {
+        const data = await api('/api/teach/start', {
+          session_name: quickRecordName(),
+          with_camera: false,
+          high_smooth: true,
+          capture_type: 'quick_motion',
+          task_name: 'quick_motion',
+          fps: 20
+        });
+        setQuickRecordState(data.message);
+        log(data.message);
+      } catch (err) {
+        setQuickRecordState(`ERROR record: ${err.message}`);
+        log(`ERROR record: ${err.message}`);
+      }
+    }
+
+    async function stopQuickRecording() {
+      try {
+        const data = await api('/api/teach/stop', {});
+        setQuickRecordState(data.message);
+        log(data.message);
+        await refreshQuickRecordings(false);
+      } catch (err) {
+        setQuickRecordState(`ERROR stop record: ${err.message}`);
+        log(`ERROR stop record: ${err.message}`);
+      }
+    }
+
+    async function refreshQuickRecordings(writeLog = false) {
+      try {
+        const data = await api('/api/recordings');
+        const select = document.getElementById('quickRecordingSelect');
+        const previous = select.value;
+        const recordings = (data.recordings || []).filter((recording) => recording.capture_type !== 'dataset_replay');
+        select.innerHTML = '';
+        if (!recordings.length) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = 'No recording yet';
+          select.appendChild(option);
+          setQuickRecordState('No replayable motion found.');
+          return;
+        }
+        recordings.forEach((recording) => {
+          const option = document.createElement('option');
+          option.value = recording.path;
+          const samples = recording.motor_samples || recording.samples || 0;
+          option.textContent = `${recording.name} (${samples} samples)`;
+          select.appendChild(option);
+        });
+        const hasPrevious = recordings.some((recording) => recording.path === previous);
+        select.value = hasPrevious ? previous : recordings[0].path;
+        setQuickRecordState(`${recordings.length} replayable motion(s) available.`);
+        if (writeLog) log(`Loaded ${recordings.length} recording(s).`);
+      } catch (err) {
+        setQuickRecordState(`ERROR recordings: ${err.message}`);
+        log(`ERROR recordings: ${err.message}`);
+      }
+    }
+
+    async function startQuickReplay() {
+      const select = document.getElementById('quickRecordingSelect');
+      if (!select.value) {
+        log('ERROR replay: select a recording');
+        return;
+      }
+      if (!document.getElementById('armed').checked) {
+        log('ERROR replay: check enable motion first');
+        return;
+      }
+      try {
+        const data = await api('/api/replay/start', {
+          path: select.value,
+          speed: Number(document.getElementById('quickReplaySpeed').value),
+          armed: true
+        });
+        setQuickRecordState(data.message);
+        log(data.message);
+      } catch (err) {
+        setQuickRecordState(`ERROR replay: ${err.message}`);
+        log(`ERROR replay: ${err.message}`);
+      }
+    }
+
+    async function stopQuickReplay() {
+      try {
+        const data = await api('/api/replay/stop', {});
+        setQuickRecordState(data.message || 'Replay stopped');
+        log(data.message || 'Replay stopped');
+      } catch (err) {
+        setQuickRecordState(`ERROR stop replay: ${err.message}`);
+        log(`ERROR stop replay: ${err.message}`);
+      }
     }
 
     async function refreshStatus(writeLog = true) {
@@ -756,16 +943,6 @@
         log(data.message);
       } catch (err) {
         log(`ERROR: ${err.message}`);
-      }
-    }
-
-    async function saveStartPosition() {
-      try {
-        const data = await api('/api/start_position/save', {});
-        updateStatus(data);
-        log(data.message);
-      } catch (err) {
-        log(`ERROR start position: ${err.message}`);
       }
     }
 

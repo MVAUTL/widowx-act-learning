@@ -257,6 +257,19 @@
       font-size: 13px;
       line-height: 1.4;
     }
+    .checkpoint-picker {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .checkpoint-meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      min-height: 16px;
+    }
     @media (max-width: 880px) {
       header { align-items: stretch; flex-direction: column; }
       .layout, .grid { grid-template-columns: 1fr; }
@@ -283,11 +296,18 @@
         <div class="grid">
           <div class="field">
             <label>Checkpoint</label>
-            <input id="checkpoint" type="text" value="/home/mvautl/Documents/Stage/widowx_ai/models/lerobot_act_push_tape_front_20260512_010000">
+            <div class="checkpoint-picker">
+              <select id="checkpointList" onchange="selectCheckpointFromList()">
+                <option value="">Loading trained models...</option>
+              </select>
+              <button onclick="refreshCheckpoints(true)">Refresh</button>
+            </div>
+            <input id="checkpoint" type="text" value="/home/mvautl/Documents/Stage/widowx_ai/models/act_redbox_top_autocut_20260602_010000">
+            <div class="checkpoint-meta" id="checkpointMeta"></div>
           </div>
           <div class="field">
             <label>Primary camera source</label>
-            <input id="primaryCameraSource" type="text" value="usb:8">
+            <input id="primaryCameraSource" type="text" value="usb:4">
           </div>
           <div class="field">
             <label>Steps</label>
@@ -422,6 +442,73 @@
       const data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(data.error || res.statusText);
       return data;
+    }
+
+    function formatCheckpointTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function renderCheckpoints(data, writeLog = false) {
+      const select = document.getElementById('checkpointList');
+      const input = document.getElementById('checkpoint');
+      const meta = document.getElementById('checkpointMeta');
+      const checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints : [];
+      select.innerHTML = '';
+      if (!checkpoints.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No local trained model found';
+        select.appendChild(option);
+        meta.textContent = `Scanned: ${data.models_root || 'widowx_ai/models'}`;
+        if (writeLog) output('No local trained model found.');
+        return;
+      }
+      checkpoints.forEach((checkpoint, index) => {
+        const option = document.createElement('option');
+        option.value = checkpoint.path;
+        option.textContent = `${index + 1}. ${checkpoint.label}`;
+        option.dataset.kind = checkpoint.kind || '';
+        option.dataset.modifiedAt = checkpoint.modified_at || '';
+        select.appendChild(option);
+      });
+      const current = input.value.trim();
+      const currentExists = checkpoints.some((checkpoint) => checkpoint.path === current);
+      select.value = currentExists ? current : checkpoints[0].path;
+      if (!currentExists) input.value = select.value;
+      updateCheckpointMeta();
+      if (writeLog) output(`Loaded ${checkpoints.length} local model checkpoint(s).`);
+    }
+
+    async function refreshCheckpoints(writeLog = false) {
+      try {
+        const data = await api('/api/model_test/checkpoints');
+        renderCheckpoints(data, writeLog);
+      } catch (err) {
+        document.getElementById('checkpointMeta').textContent = `ERROR checkpoints: ${err.message}`;
+        if (writeLog) output(`ERROR checkpoints: ${err.message}`);
+      }
+    }
+
+    function updateCheckpointMeta() {
+      const select = document.getElementById('checkpointList');
+      const option = select.options[select.selectedIndex];
+      const meta = document.getElementById('checkpointMeta');
+      if (!option || !option.value) {
+        meta.textContent = '';
+        return;
+      }
+      const kind = option.dataset.kind || 'checkpoint';
+      const modified = formatCheckpointTime(option.dataset.modifiedAt);
+      meta.textContent = modified ? `${kind} · last modified ${modified}` : kind;
+    }
+
+    function selectCheckpointFromList() {
+      const select = document.getElementById('checkpointList');
+      if (!select.value) return;
+      document.getElementById('checkpoint').value = select.value;
+      updateCheckpointMeta();
     }
 
     function isSafetyWarningText(text) {
@@ -636,7 +723,7 @@
     let cameraTimer = null;
     let cameraSources = [];
     let activeCameraSource = '';
-    let resolutionState = { top_view: "640x480", d405: "640x480" };
+    let resolutionState = { top_view: "720x720", d405: "640x480" };
 
     function renderCameraSources(sources, activeSource) {
       const select = document.getElementById('cameraSource');
@@ -779,6 +866,7 @@
     }
 
     refreshStatus();
+    refreshCheckpoints(false);
     refreshCameraHub(false);
     drawTrajectory([]);
     setInterval(refreshStatus, 2000);

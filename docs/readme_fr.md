@@ -2,7 +2,7 @@
 
 Ce projet contient des outils locaux pour controler un bras Trossen Robotics WidowX AI, enregistrer des demonstrations, entrainer un petit modele ACT-style et tester un checkpoint avec des garde-fous.
 
-Documentation anglaise: [README.en.md](README.en.md)
+Documentation anglaise: [readme_en.md](readme_en.md)
 
 Liens de recherche et papiers telecharges: [research/README.md](research/README.md)
 

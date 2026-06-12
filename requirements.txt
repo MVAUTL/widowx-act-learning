@@ -1,5 +1,5 @@
 # WidowX robot driver and Trossen/LeRobot UI stack
-trossen-arm==1.9.1
+trossen-arm==1.10.0
 trossen-ai-data-collection-ui==1.2.2
 
 # Numeric, camera, and image runtime used by the local web UI
