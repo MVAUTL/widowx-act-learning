@@ -1845,6 +1845,24 @@ class ArmController:
                 self.gripper_position = float(self.driver.get_gripper_position())
             return self.gripper_position
 
+    def replay_gripper_position(self, gripper_position: float, minimum_time: float = 0.4) -> float:
+        with self.lock:
+            current = self.gripper_position
+            if self.args.real and self.driver is not None:
+                current = float(self.driver.get_gripper_position())
+                self.gripper_position = current
+            delta = abs(gripper_position - current) if current is not None else 0.0
+            move_time = max(
+                minimum_time,
+                delta / REPLAY_GRIPPER_MAX_SPEED if delta > 0 else minimum_time,
+            )
+            if self.args.real and self.driver is not None:
+                self.driver.set_gripper_mode(trossen_arm.Mode.position)
+                self.driver.set_gripper_position(gripper_position, move_time, False)
+            self.gripper_position = gripper_position
+            self.last_message = f"Moving gripper after waypoint arrival ({move_time:.2f}s)"
+            return move_time
+
     def replay_speed_limit(self) -> float:
         with self.lock:
             return self.max_speed
