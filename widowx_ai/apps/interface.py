@@ -50,6 +50,7 @@ from .config import (
 from .hamster import HamsterService
 from .imitation import ImitationTrajectoryRunner
 from .lerobot_export import ActDatasetPlanner, LeRobotExportRunner
+from .trajectory_overlay import TrajectoryOverlay
 
 try:
     import cv2
@@ -75,6 +76,10 @@ DATASET_TRIM_HTML = (Path(__file__).resolve().parent / "pages" / "dataset_trim.h
 
 
 IMITATION_HTML = (Path(__file__).resolve().parent / "pages" / "imitation.html").read_text(encoding="utf-8")
+
+IMITATION_REVIEW_JS = (Path(__file__).resolve().parent / "static" / "imitation_review.js").read_text(encoding="utf-8")
+
+IMITATION_TRAJECTORY_JS = (Path(__file__).resolve().parent / "static" / "imitation_trajectory.js").read_text(encoding="utf-8")
 
 
 class CameraController:
@@ -616,6 +621,7 @@ class TeachRecorder:
         self.with_camera = True
         self.video_source: str | None = None
         self.capture_sources: list[dict[str, Any]] = []
+        self.trajectory_overlay: TrajectoryOverlay | None = None
         self.latest_qpos: list[float] | None = None
         self.latest_gripper_position: float | None = None
         self.latest_motor_index = -1
@@ -638,6 +644,7 @@ class TeachRecorder:
                 "with_camera": self.with_camera,
                 "video_source": self.video_source,
                 "capture_sources": self.capture_sources,
+                "trajectory_overlay": self.trajectory_overlay.metadata() if self.trajectory_overlay else None,
                 "mode": self.recording_mode,
                 "message": self.last_error or self.last_message,
             }
@@ -672,6 +679,7 @@ class TeachRecorder:
                 )
         if not capture_sources and video_source:
             capture_sources = [{"source": video_source, "role": "main", "crop": None}]
+        trajectory_overlay = TrajectoryOverlay.from_payload(payload.get("trajectory_overlay"))
         session_name = str(payload.get("session_name", "")).strip()
         if not session_name:
             session_name = datetime.now().strftime("teach_%Y%m%d_%H%M%S")
@@ -705,6 +713,7 @@ class TeachRecorder:
                 "with_camera": with_camera,
                 "video_source": video_source,
                 "capture_sources": capture_sources,
+                "trajectory_overlay": trajectory_overlay.metadata() if trajectory_overlay else None,
                 "capture_type": str(payload.get("capture_type", "manual")),
                 "source_recording": payload.get("source_recording"),
                 "task_name": str(payload.get("task_name", "")).strip() or None,
@@ -743,6 +752,7 @@ class TeachRecorder:
             self.with_camera = with_camera
             self.video_source = video_source
             self.capture_sources = capture_sources
+            self.trajectory_overlay = trajectory_overlay
             self.latest_qpos = None
             self.latest_gripper_position = None
             self.latest_motor_index = -1
@@ -797,6 +807,7 @@ class TeachRecorder:
             "with_camera": self.with_camera,
             "video_source": self.video_source,
             "capture_sources": self.capture_sources,
+            "trajectory_overlay": self.trajectory_overlay.metadata() if self.trajectory_overlay else None,
             "mode": self.recording_mode,
             "message": message,
         }
@@ -811,20 +822,28 @@ class TeachRecorder:
             return {"main": self._capture_frame_jpeg()}
         frames: dict[str, bytes] = {}
         for entry in self.capture_sources:
-            frames[entry["role"]] = self.camera.video_frame_jpeg(entry["source"], entry.get("crop"))
+            role = entry["role"]
+            frames[role] = self._apply_trajectory_overlay(role, self.camera.video_frame_jpeg(entry["source"], entry.get("crop")))
         return frames
+
+    def _apply_trajectory_overlay(self, role: str, frame: bytes) -> bytes:
+        overlay = self.trajectory_overlay
+        return overlay.apply_jpeg(frame) if overlay and overlay.role == role else frame
 
     def _capture_frame_set_with_timestamps(self) -> tuple[dict[str, bytes], dict[str, float], float, float]:
         capture_start = time.time()
         if not self.capture_sources:
-            frame = self._capture_frame_jpeg()
+            frame = self._apply_trajectory_overlay("main", self._capture_frame_jpeg())
             capture_end = time.time()
             return {"main": frame}, {"main": capture_end}, capture_start, capture_end
         frames: dict[str, bytes] = {}
         frame_timestamps: dict[str, float] = {}
         for entry in self.capture_sources:
             role = entry["role"]
-            frames[role] = self.camera.video_frame_jpeg(entry["source"], entry.get("crop"))
+            frames[role] = self._apply_trajectory_overlay(
+                role,
+                self.camera.video_frame_jpeg(entry["source"], entry.get("crop")),
+            )
             frame_timestamps[role] = time.time()
         capture_end = time.time()
         return frames, frame_timestamps, capture_start, capture_end
@@ -2336,6 +2355,67 @@ class ModelTestRunner:
             raise RuntimeError(f"{name} must be between {low} and {high}.")
         return value
 
+    def checkpoints(self) -> dict[str, Any]:
+        models_root = self.project_root / "widowx_ai" / "models"
+        candidates: dict[Path, dict[str, Any]] = {}
+        if models_root.exists():
+            for path in models_root.rglob("*"):
+                checkpoint = self._checkpoint_candidate(path)
+                if checkpoint is None:
+                    continue
+                stat_path = checkpoint if checkpoint.is_file() else checkpoint
+                try:
+                    modified = stat_path.stat().st_mtime
+                except OSError:
+                    modified = 0.0
+                existing = candidates.get(checkpoint)
+                if existing is None or modified > existing["modified_ts"]:
+                    candidates[checkpoint] = {
+                        "path": str(checkpoint),
+                        "label": self._checkpoint_label(models_root, checkpoint),
+                        "kind": self._checkpoint_kind(checkpoint),
+                        "modified_ts": modified,
+                        "modified_at": datetime.fromtimestamp(modified).isoformat(timespec="seconds") if modified else None,
+                    }
+        items = sorted(candidates.values(), key=lambda item: item["modified_ts"], reverse=True)
+        for item in items:
+            item.pop("modified_ts", None)
+        return {"ok": True, "models_root": str(models_root), "checkpoints": items[:30]}
+
+    @staticmethod
+    def _checkpoint_candidate(path: Path) -> Path | None:
+        if path.is_dir():
+            if path.name == "pretrained_model" and (path.parent / "pretrained_model" / "config.json").exists():
+                return None
+            if (path / "pretrained_model" / "config.json").exists():
+                return path
+            if (path / "config.json").exists():
+                return path
+            if (path / "best.pt").exists():
+                return path / "best.pt"
+            return None
+        if path.name in {"best.pt", "last.pt"}:
+            return path
+        return None
+
+    @staticmethod
+    def _checkpoint_kind(path: Path) -> str:
+        if path.is_dir() and (path / "pretrained_model" / "config.json").exists():
+            return "LeRobot policy"
+        if path.is_dir() and (path / "config.json").exists():
+            return "LeRobot checkpoint"
+        if path.is_file():
+            return path.suffix.lstrip(".") or "file"
+        return "checkpoint"
+
+    @staticmethod
+    def _checkpoint_label(models_root: Path, checkpoint: Path) -> str:
+        try:
+            rel = checkpoint.relative_to(models_root)
+        except ValueError:
+            rel = checkpoint
+        return str(rel)
+
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.python.exists():
             raise RuntimeError(f"Python environment not found: {self.python}")
@@ -2669,6 +2749,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(IMITATION_HTML.encode("utf-8"))
             return
+        if parsed.path == "/static/imitation_review.js":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(IMITATION_REVIEW_JS.encode("utf-8"))
+            return
+        if parsed.path == "/static/imitation_trajectory.js":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(IMITATION_TRAJECTORY_JS.encode("utf-8"))
+            return
         if parsed.path == "/dataset-trim":
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -2704,6 +2796,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/trossen_ui/status":
             self.send_json(self.trossen_ui_runner.status())
+            return
+        if parsed.path == "/api/model_test/checkpoints":
+            self.send_json(self.model_test_runner.checkpoints())
             return
         if parsed.path == "/api/recordings":
             query = parse_qs(parsed.query)

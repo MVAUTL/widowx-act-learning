@@ -2,7 +2,7 @@
 
 This project provides local tools to control a Trossen Robotics WidowX AI arm, record demonstrations, train a small ACT-style policy, and test checkpoints with conservative safety gates.
 
-French documentation: [README.fr.md](README.fr.md)
+French documentation: [readme_fr.md](readme_fr.md)
 
 Research links and downloaded papers: [research/README.md](research/README.md)
 

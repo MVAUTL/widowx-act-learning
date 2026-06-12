@@ -145,6 +145,11 @@ class ImitationTrajectoryRunner:
             "high_smooth": True,
             "with_camera": True,
             "capture_type": "hamster_imitation",
+            "trajectory_overlay": {
+                "enabled": True,
+                "role": "hamster_view",
+                "points": payload.get("hamster_points", []),
+            },
             "task_name": payload.get("task_name") or hamster_prompt or "hamster_imitation",
             "dataset_profile": payload.get("dataset_profile"),
             "action_offset": payload.get("action_offset", 1),
